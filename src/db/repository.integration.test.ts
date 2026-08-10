@@ -13,7 +13,7 @@ suite("MarimoRepository integration", () => {
   beforeAll(async () => {
     await runMigrations(pool);
     await pool.query(
-      "TRUNCATE marimo_xp_awards, marimo_waterings, marimos, marimo_guild_configs RESTART IDENTITY CASCADE"
+      "TRUNCATE marimo_allowed_roles, marimo_xp_awards, marimo_waterings, marimos, marimo_guild_configs RESTART IDENTITY CASCADE"
     );
   });
 
@@ -277,5 +277,16 @@ suite("MarimoRepository integration", () => {
     const config = await repository.getConfig("1003");
     expect(config.agePanelChannelId).toBeNull();
     expect(config.agePanelMessageId).toBeNull();
+  });
+
+  it("stores multiple allowed roles idempotently and removes them", async () => {
+    expect(await repository.allowedRoleIds("1007")).toEqual([]);
+    expect(await repository.addAllowedRole("1007", "5001")).toBe(true);
+    expect(await repository.addAllowedRole("1007", "5001")).toBe(false);
+    expect(await repository.addAllowedRole("1007", "5002")).toBe(true);
+    expect(await repository.allowedRoleIds("1007")).toEqual(["5001", "5002"]);
+    expect(await repository.removeAllowedRole("1007", "5001")).toBe(true);
+    expect(await repository.removeAllowedRole("1007", "5001")).toBe(false);
+    expect(await repository.allowedRoleIds("1007")).toEqual(["5002"]);
   });
 });

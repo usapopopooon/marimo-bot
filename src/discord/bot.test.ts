@@ -18,8 +18,18 @@ import type {
   Watering
 } from "../domain/types.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
-import { isMarimoImageLog, MarimoBot, missingLogPermissions } from "./bot.js";
-import { NAME_BUTTON_ID, NAME_MODAL_ID } from "./presentation.js";
+import {
+  hasMarimoAccess,
+  isMarimoImageLog,
+  MarimoBot,
+  missingLogPermissions
+} from "./bot.js";
+import {
+  NAME_BUTTON_ID,
+  NAME_MODAL_ID,
+  STATUS_BUTTON_ID,
+  WATER_BUTTON_ID
+} from "./presentation.js";
 
 const config: Config = {
   DISCORD_TOKEN: "token",
@@ -121,7 +131,10 @@ type PanelPoster = {
 
 function botWith(repository: Partial<MarimoRepository>): MarimoBot {
   return new MarimoBot(
-    repository as MarimoRepository,
+    {
+      allowedRoleIds: vi.fn().mockResolvedValue([]),
+      ...repository
+    } as MarimoRepository,
     {} as XpDelivery,
     config,
     pino({ level: "silent" })
@@ -204,12 +217,21 @@ describe("panel interaction wiring", () => {
     ]);
   });
 
+  it("allows everyone when roles are unset and otherwise requires a role or manager", () => {
+    expect(hasMarimoAccess([], [], false)).toBe(true);
+    expect(hasMarimoAccess(["allowed"], ["allowed"], false)).toBe(true);
+    expect(hasMarimoAccess(["first", "second"], ["second"], false)).toBe(true);
+    expect(hasMarimoAccess(["allowed"], ["other"], false)).toBe(false);
+    expect(hasMarimoAccess(["allowed"], [], true)).toBe(true);
+  });
+
   it("opens the naming modal from the panel button", async () => {
     const showModal = vi
       .fn<(modal: ModalBuilder) => Promise<void>>()
       .mockResolvedValue(undefined);
     await dispatch(
       botWith({
+        allowedRoleIds: vi.fn().mockResolvedValue(["5001"]),
         getConfig: vi.fn().mockResolvedValue({
           ...guildConfig,
           waterPanelChannelId: "3001",
@@ -224,6 +246,8 @@ describe("panel interaction wiring", () => {
         channelId: "3001",
         message: { id: "4001" },
         user: { id: "2001" },
+        member: { roles: ["5001"] },
+        memberPermissions: new PermissionsBitField([]),
         showModal
       }
     );
@@ -232,6 +256,100 @@ describe("panel interaction wiring", () => {
     expect(showModal.mock.calls[0]?.[0].toJSON()).toMatchObject({
       custom_id: NAME_MODAL_ID
     });
+  });
+
+  it("blocks every user action when none of the configured roles match", async () => {
+    const water = vi.fn();
+    const getLiving = vi.fn();
+    const rename = vi.fn();
+    const repository: Partial<MarimoRepository> = {
+      allowedRoleIds: vi.fn().mockResolvedValue(["5001", "5002"]),
+      getConfig: vi.fn().mockResolvedValue({
+        ...guildConfig,
+        waterPanelChannelId: "3001",
+        waterPanelMessageId: "4001"
+      }),
+      water,
+      getLiving,
+      rename
+    };
+    const expected = {
+      content: [
+        "まりもBotを利用するには、次のロールのいずれかが必要です。",
+        "<@&5001>、<@&5002>"
+      ].join("\n"),
+      ephemeral: true,
+      allowedMentions: { parse: [] }
+    };
+
+    for (const customId of [
+      WATER_BUTTON_ID,
+      STATUS_BUTTON_ID,
+      NAME_BUTTON_ID
+    ]) {
+      const reply = vi.fn().mockResolvedValue(undefined);
+      await dispatch(botWith(repository), {
+        isButton: () => true,
+        customId,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        member: { roles: ["other"] },
+        memberPermissions: new PermissionsBitField([]),
+        reply
+      });
+      expect(reply).toHaveBeenCalledWith(expected);
+    }
+
+    const modalReply = vi.fn().mockResolvedValue(undefined);
+    await dispatch(botWith(repository), {
+      isButton: () => false,
+      isModalSubmit: () => true,
+      customId: NAME_MODAL_ID,
+      guildId: "1001",
+      user: { id: "2001" },
+      member: { roles: ["other"] },
+      memberPermissions: new PermissionsBitField([]),
+      reply: modalReply
+    });
+
+    expect(modalReply).toHaveBeenCalledWith(expected);
+    expect(water).not.toHaveBeenCalled();
+    expect(getLiving).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it("lets a server manager use the panel without querying role restrictions", async () => {
+    const allowedRoleIds = vi.fn();
+    const showModal = vi.fn().mockResolvedValue(undefined);
+    await dispatch(
+      botWith({
+        allowedRoleIds,
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        getLiving: vi.fn().mockResolvedValue(living)
+      }),
+      {
+        isButton: () => true,
+        customId: NAME_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([
+          PermissionFlagsBits.ManageGuild
+        ]),
+        showModal
+      }
+    );
+
+    expect(allowedRoleIds).not.toHaveBeenCalled();
+    expect(showModal).toHaveBeenCalledOnce();
   });
 
   it("rejects a copied or superseded panel before changing data", async () => {
@@ -413,7 +531,10 @@ describe("panel interaction wiring", () => {
       channelId: "3001",
       channel: logChannel(),
       memberPermissions: { has: () => true },
-      options: { getSubcommand: () => "log" },
+      options: {
+        getSubcommand: () => "log",
+        getSubcommandGroup: () => null
+      },
       reply
     });
 
@@ -421,6 +542,67 @@ describe("panel interaction wiring", () => {
     expect(reply).toHaveBeenCalledWith({
       content: "画像ログの投稿先を <#3001> に設定しました。",
       ephemeral: true
+    });
+  });
+
+  it("adds an allowed role through the admin command", async () => {
+    const addAllowedRole = vi.fn().mockResolvedValue(true);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(botWith({ addAllowedRole }), {
+      isButton: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => true,
+      commandName: "marimo-admin",
+      guildId: "1001",
+      memberPermissions: new PermissionsBitField([
+        PermissionFlagsBits.ManageGuild
+      ]),
+      options: {
+        getSubcommand: () => "add",
+        getSubcommandGroup: () => "role",
+        getRole: () => ({ id: "5001" })
+      },
+      reply
+    });
+
+    expect(addAllowedRole).toHaveBeenCalledWith("1001", "5001");
+    expect(reply).toHaveBeenCalledWith({
+      content: "<@&5001> を利用可能ロールに追加しました。",
+      ephemeral: true,
+      allowedMentions: { parse: [] }
+    });
+  });
+
+  it("removes the final allowed role and reports that access is open", async () => {
+    const removeAllowedRole = vi.fn().mockResolvedValue(true);
+    const allowedRoleIds = vi.fn().mockResolvedValue([]);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(botWith({ removeAllowedRole, allowedRoleIds }), {
+      isButton: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => true,
+      commandName: "marimo-admin",
+      guildId: "1001",
+      memberPermissions: new PermissionsBitField([
+        PermissionFlagsBits.ManageGuild
+      ]),
+      options: {
+        getSubcommand: () => "remove",
+        getSubcommandGroup: () => "role",
+        getRole: () => ({ id: "5001" })
+      },
+      reply
+    });
+
+    expect(removeAllowedRole).toHaveBeenCalledWith("1001", "5001");
+    expect(allowedRoleIds).toHaveBeenCalledWith("1001");
+    expect(reply).toHaveBeenCalledWith({
+      content:
+        "<@&5001> を削除しました。利用可能ロールが未設定になったため、全員が利用できます。",
+      ephemeral: true,
+      allowedMentions: { parse: [] }
     });
   });
 

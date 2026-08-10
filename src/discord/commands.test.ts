@@ -25,4 +25,21 @@ describe("Discord commands", () => {
       '"name":"log-refresh","description":"まりも画像ログを全履歴から時系列で作り直す"'
     );
   });
+
+  it("configures allowed roles with add, remove, and list subcommands", () => {
+    const commandJson = JSON.stringify(commands);
+
+    expect(commandJson).toContain(
+      '"name":"role","description":"まりもBotを利用できるロールを設定"'
+    );
+    expect(commandJson).toContain(
+      '"name":"add","description":"利用できるロールを追加"'
+    );
+    expect(commandJson).toContain(
+      '"name":"remove","description":"利用できるロールを削除"'
+    );
+    expect(commandJson).toContain(
+      '"name":"list","description":"利用できるロールを確認"'
+    );
+  });
 });

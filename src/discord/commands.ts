@@ -33,6 +33,36 @@ export const commands = [
         .setName("log-refresh")
         .setDescription("まりも画像ログを全履歴から時系列で作り直す")
     )
+    .addSubcommandGroup((group) =>
+      group
+        .setName("role")
+        .setDescription("まりもBotを利用できるロールを設定")
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("add")
+            .setDescription("利用できるロールを追加")
+            .addRoleOption((option) =>
+              option
+                .setName("role")
+                .setDescription("追加するロール")
+                .setRequired(true)
+            )
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("remove")
+            .setDescription("利用できるロールを削除")
+            .addRoleOption((option) =>
+              option
+                .setName("role")
+                .setDescription("削除するロール")
+                .setRequired(true)
+            )
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName("list").setDescription("利用できるロールを確認")
+        )
+    )
     .addSubcommand((subcommand) =>
       subcommand.setName("status").setDescription("現在の設定を確認")
     )

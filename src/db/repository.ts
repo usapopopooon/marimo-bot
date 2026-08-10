@@ -405,6 +405,41 @@ export class MarimoRepository {
     };
   }
 
+  public async allowedRoleIds(guildId: string): Promise<string[]> {
+    const result = await this.pool.query<{ role_id: string }>(
+      `SELECT role_id FROM marimo_allowed_roles
+       WHERE guild_id = $1
+       ORDER BY created_at, role_id`,
+      [guildId]
+    );
+    return result.rows.map((row) => row.role_id);
+  }
+
+  public async addAllowedRole(
+    guildId: string,
+    roleId: string
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO marimo_allowed_roles (guild_id, role_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [guildId, roleId]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  public async removeAllowedRole(
+    guildId: string,
+    roleId: string
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `DELETE FROM marimo_allowed_roles
+       WHERE guild_id = $1 AND role_id = $2`,
+      [guildId, roleId]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
   public async setLogChannel(
     guildId: string,
     channelId: string | null

@@ -109,6 +109,31 @@ export function missingLogPermissions(
     .map(([, label]) => label);
 }
 
+export function hasMarimoAccess(
+  allowedRoleIds: readonly string[],
+  memberRoleIds: readonly string[],
+  canManageGuild: boolean
+): boolean {
+  return (
+    canManageGuild ||
+    allowedRoleIds.length === 0 ||
+    allowedRoleIds.some((roleId) => memberRoleIds.includes(roleId))
+  );
+}
+
+function interactionRoleIds(
+  interaction: ButtonInteraction | ModalSubmitInteraction
+): string[] {
+  const roleIds =
+    interaction.member instanceof GuildMember
+      ? [...interaction.member.roles.cache.keys()]
+      : (interaction.member?.roles ?? []);
+  if (interaction.guildId !== null && !roleIds.includes(interaction.guildId)) {
+    roleIds.unshift(interaction.guildId);
+  }
+  return roleIds;
+}
+
 function errorDetails(error: unknown): Record<string, unknown> {
   if (!(error instanceof Error)) return { message: String(error) };
   const coded = error as Error & { code?: unknown; status?: unknown };
@@ -193,6 +218,11 @@ export class MarimoBot {
           !(await this.ensureCurrentWaterPanel(interaction))
         )
           return;
+        if (
+          isMarimoPanelButton &&
+          !(await this.ensureMarimoAccess(interaction))
+        )
+          return;
         if (interaction.customId === WATER_BUTTON_ID)
           await this.handleWater(interaction);
         if (interaction.customId === STATUS_BUTTON_ID)
@@ -202,7 +232,10 @@ export class MarimoBot {
         return;
       }
       if (interaction.isModalSubmit()) {
-        if (interaction.customId === NAME_MODAL_ID)
+        if (
+          interaction.customId === NAME_MODAL_ID &&
+          (await this.ensureMarimoAccess(interaction))
+        )
           await this.handleNameModal(interaction);
         return;
       }
@@ -244,6 +277,35 @@ export class MarimoBot {
       });
     }
     return isCurrent;
+  }
+
+  private async ensureMarimoAccess(
+    interaction: ButtonInteraction | ModalSubmitInteraction
+  ): Promise<boolean> {
+    if (interaction.guildId === null) return true;
+    const canManageGuild =
+      interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ===
+      true;
+    if (canManageGuild) return true;
+    const allowedRoleIds = await this.repository.allowedRoleIds(
+      interaction.guildId
+    );
+    const allowed = hasMarimoAccess(
+      allowedRoleIds,
+      interactionRoleIds(interaction),
+      false
+    );
+    if (!allowed) {
+      await interaction.reply({
+        content: [
+          "まりもBotを利用するには、次のロールのいずれかが必要です。",
+          allowedRoleIds.map((roleId) => `<@&${roleId}>`).join("、")
+        ].join("\n"),
+        ephemeral: true,
+        allowedMentions: { parse: [] }
+      });
+    }
+    return allowed;
   }
 
   private async handleWater(interaction: ButtonInteraction): Promise<void> {
@@ -417,6 +479,11 @@ export class MarimoBot {
       return;
     }
     const subcommand = interaction.options.getSubcommand();
+    const subcommandGroup = interaction.options.getSubcommandGroup(false);
+    if (subcommandGroup === "role") {
+      await this.handleRoleCommand(interaction, subcommand);
+      return;
+    }
     if (subcommand === "panel") {
       await this.postPanel(interaction);
       return;
@@ -464,16 +531,79 @@ export class MarimoBot {
       await this.repostAllLogs(interaction);
       return;
     }
-    const config = await this.repository.getConfig(interaction.guildId);
+    const [config, allowedRoleIds] = await Promise.all([
+      this.repository.getConfig(interaction.guildId),
+      this.repository.allowedRoleIds(interaction.guildId)
+    ]);
     await interaction.reply({
       content: [
         "# まりもBot設定",
         `水替えパネル: ${configuredChannel(config.waterPanelMessageId, config.waterPanelChannelId)}`,
         `大きさランキング: ${configuredChannel(config.sizePanelMessageId, config.sizePanelChannelId)}`,
         `画像ログ: ${config.logChannelId === null ? "未設定" : `<#${config.logChannelId}>`}`,
+        `利用可能ロール: ${allowedRoleIds.length === 0 ? "未設定（全員利用可能）" : allowedRoleIds.map((roleId) => `<@&${roleId}>`).join("、")}`,
         `XP連携: ${this.xpDelivery.enabled ? "有効" : "未設定（outboxに保持）"}`
       ].join("\n"),
-      ephemeral: true
+      ephemeral: true,
+      allowedMentions: { parse: [] }
+    });
+  }
+
+  private async handleRoleCommand(
+    interaction: ChatInputCommandInteraction,
+    subcommand: string
+  ): Promise<void> {
+    if (interaction.guildId === null)
+      throw new Error("Role command requires a guild");
+    if (subcommand === "list") {
+      const roleIds = await this.repository.allowedRoleIds(interaction.guildId);
+      await interaction.reply({
+        content:
+          roleIds.length === 0
+            ? "利用可能ロールは未設定です。現在は全員がまりもBotを利用できます。"
+            : [
+                "次のロールのいずれか、またはサーバー管理権限があれば利用できます。",
+                roleIds.map((roleId) => `<@&${roleId}>`).join("、")
+              ].join("\n"),
+        ephemeral: true,
+        allowedMentions: { parse: [] }
+      });
+      return;
+    }
+
+    const role = interaction.options.getRole("role", true);
+    if (subcommand === "add") {
+      const added = await this.repository.addAllowedRole(
+        interaction.guildId,
+        role.id
+      );
+      await interaction.reply({
+        content: added
+          ? `<@&${role.id}> を利用可能ロールに追加しました。`
+          : `<@&${role.id}> はすでに利用可能ロールです。`,
+        ephemeral: true,
+        allowedMentions: { parse: [] }
+      });
+      return;
+    }
+    if (subcommand !== "remove")
+      throw new Error(`Unknown role subcommand: ${subcommand}`);
+
+    const removed = await this.repository.removeAllowedRole(
+      interaction.guildId,
+      role.id
+    );
+    const remaining = removed
+      ? await this.repository.allowedRoleIds(interaction.guildId)
+      : [];
+    await interaction.reply({
+      content: !removed
+        ? `<@&${role.id}> は利用可能ロールに設定されていません。`
+        : remaining.length === 0
+          ? `<@&${role.id}> を削除しました。利用可能ロールが未設定になったため、全員が利用できます。`
+          : `<@&${role.id}> を利用可能ロールから削除しました。`,
+      ephemeral: true,
+      allowedMentions: { parse: [] }
     });
   }
 
