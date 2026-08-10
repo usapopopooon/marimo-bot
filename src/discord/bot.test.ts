@@ -1,6 +1,6 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
-import type { Interaction, ModalBuilder } from "discord.js";
+import { TextChannel, type Interaction, type ModalBuilder } from "discord.js";
 import type { Config } from "../config/env.js";
 import type { MarimoRepository } from "../db/repository.js";
 import type { GuildConfig, RankingEntry } from "../domain/types.js";
@@ -115,6 +115,30 @@ describe("panel interaction wiring", () => {
       [living],
       now
     );
+  });
+
+  it("uses the command channel as the image log channel", async () => {
+    const setLogChannel = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(botWith({ setLogChannel }), {
+      isButton: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => true,
+      commandName: "marimo-admin",
+      guildId: "1001",
+      channelId: "3001",
+      channel: Object.create(TextChannel.prototype) as TextChannel,
+      memberPermissions: { has: () => true },
+      options: { getSubcommand: () => "log" },
+      reply
+    });
+
+    expect(setLogChannel).toHaveBeenCalledWith("1001", "3001");
+    expect(reply).toHaveBeenCalledWith({
+      content: "画像ログの投稿先を <#3001> に設定しました。",
+      ephemeral: true
+    });
   });
 
   it("passes modal guild, user, and trimmed name to rename", async () => {

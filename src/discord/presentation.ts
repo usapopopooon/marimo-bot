@@ -22,7 +22,7 @@ export function waterPanel(waterXp: number): {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(WATER_BUTTON_ID)
-      .setLabel("水を替える")
+      .setLabel("育て始める・水を替える")
       .setEmoji("🫧")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
@@ -38,7 +38,8 @@ export function waterPanel(waterXp: number): {
     content: [
       "# 🟢 まりもちゃん",
       "まりもは時間とともに、どこまでも大きくなります。",
-      `1日1回水を替えると **${waterXp} XP**。丸一日忘れると枯れてしまい、次の世代へリセットされます。`,
+      "初めての人はボタンを押すと、自分のまりもが生まれます。",
+      `以後は1日1回水を替えると **${waterXp} XP**。丸一日忘れると枯れてしまい、次の世代へリセットされます。`,
       "",
       "-# 日付は日本時間の0:00に切り替わります"
     ].join("\n"),

@@ -1,8 +1,4 @@
-import {
-  ChannelType,
-  PermissionFlagsBits,
-  SlashCommandBuilder
-} from "discord.js";
+import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 
 export const commands = [
   new SlashCommandBuilder()
@@ -27,14 +23,7 @@ export const commands = [
     .addSubcommand((subcommand) =>
       subcommand
         .setName("log")
-        .setDescription("画像ログの投稿先を指定")
-        .addChannelOption((option) =>
-          option
-            .setName("channel")
-            .setDescription("まりも画像を流すチャンネル")
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        )
+        .setDescription("実行したチャンネルを画像ログの投稿先に設定")
     )
     .addSubcommand((subcommand) =>
       subcommand.setName("log-disable").setDescription("画像ログを停止")

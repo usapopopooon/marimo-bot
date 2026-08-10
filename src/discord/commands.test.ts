@@ -13,4 +13,13 @@ describe("Discord commands", () => {
     expect(commandJson).not.toContain('"value":"age"');
     expect(commandJson).not.toContain("生存日数ランキング");
   });
+
+  it("configures logging in the channel where the command runs", () => {
+    const commandJson = JSON.stringify(commands);
+
+    expect(commandJson).toContain(
+      '"name":"log","description":"実行したチャンネルを画像ログの投稿先に設定"'
+    );
+    expect(commandJson).not.toContain('"name":"channel"');
+  });
 });

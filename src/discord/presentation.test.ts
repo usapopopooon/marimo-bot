@@ -6,7 +6,8 @@ import {
   NAME_INPUT_ID,
   NAME_MODAL_ID,
   rankingContent,
-  waterPanel
+  waterPanel,
+  WATER_BUTTON_ID
 } from "./presentation.js";
 
 function entry(userId: string, age: number, size: number): RankingEntry {
@@ -28,6 +29,7 @@ function entry(userId: string, age: number, size: number): RankingEntry {
 describe("Discord presentation", () => {
   it("explains the hard reset and exact daily XP", () => {
     const panel = waterPanel(10);
+    expect(panel.content).toContain("自分のまりもが生まれます");
     expect(panel.content).toContain("1日1回");
     expect(panel.content).toContain("10 XP");
     expect(panel.content).toContain("枯れてしまい");
@@ -35,6 +37,14 @@ describe("Discord presentation", () => {
     expect(
       panel.components[0]?.components.map((component) => component.toJSON())
     ).toContainEqual(expect.objectContaining({ custom_id: NAME_BUTTON_ID }));
+    expect(
+      panel.components[0]?.components.map((component) => component.toJSON())
+    ).toContainEqual(
+      expect.objectContaining({
+        custom_id: WATER_BUTTON_ID,
+        label: "育て始める・水を替える"
+      })
+    );
   });
 
   it("opens a constrained name modal from the panel", () => {

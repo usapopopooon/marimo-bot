@@ -311,10 +311,19 @@ export class MarimoBot {
       return;
     }
     if (subcommand === "log") {
-      const channel = interaction.options.getChannel("channel", true);
-      await this.repository.setLogChannel(interaction.guildId, channel.id);
+      if (!(interaction.channel instanceof TextChannel)) {
+        await interaction.reply({
+          content: "テキストチャンネルで実行してください。",
+          ephemeral: true
+        });
+        return;
+      }
+      await this.repository.setLogChannel(
+        interaction.guildId,
+        interaction.channelId
+      );
       await interaction.reply({
-        content: `画像ログの投稿先を <#${channel.id}> に設定しました。`,
+        content: `画像ログの投稿先を <#${interaction.channelId}> に設定しました。`,
         ephemeral: true
       });
       return;
