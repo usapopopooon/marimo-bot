@@ -20,6 +20,10 @@ export function displayMarimoName(name: string): string {
   return escapeMarkdown(name);
 }
 
+function ownerLink(userId: string, ownerDisplayName: string): string {
+  return `[@${escapeMarkdown(ownerDisplayName)}](https://discord.com/users/${userId})`;
+}
+
 export function waterPanel(waterXp: number): {
   content: string;
   components: ActionRowBuilder<ButtonBuilder>[];
@@ -70,7 +74,7 @@ export function nameModal(): ModalBuilder {
 }
 
 function leaderboardLine(entry: RankingEntry, rank: number): string {
-  return `**${rank}位**｜<@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm**｜${displayMarimoName(entry.name)}`;
+  return `**${rank}位**｜${ownerLink(entry.userId, entry.ownerDisplayName)}｜**${entry.sizeMm.toFixed(2)} mm**｜${displayMarimoName(entry.name)}`;
 }
 
 export function rankingContent(
@@ -110,22 +114,22 @@ export function statusContent(entry: RankingEntry): string {
 export function wateringLogContent(watering: Watering): string {
   return [
     watering.isBirth
-      ? `🟢 <@${watering.marimo.userId}> の **${displayMarimoName(watering.marimo.name)}** が生まれました`
-      : `🫧 <@${watering.marimo.userId}> が **${displayMarimoName(watering.marimo.name)}** の水を替えました`,
+      ? `🟢 ${ownerLink(watering.marimo.userId, watering.marimo.ownerDisplayName)} の **${displayMarimoName(watering.marimo.name)}** が生まれました`
+      : `🫧 ${ownerLink(watering.marimo.userId, watering.marimo.ownerDisplayName)} が **${displayMarimoName(watering.marimo.name)}** の水を替えました`,
     `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`
   ].join("\n");
 }
 
 export function currentMarimoLogContent(entry: RankingEntry): string {
   return [
-    `🟢 <@${entry.userId}> の **${displayMarimoName(entry.name)}**`,
+    `🟢 ${ownerLink(entry.userId, entry.ownerDisplayName)} の **${displayMarimoName(entry.name)}**`,
     `第${entry.generation}世代｜生後 **${entry.ageDays}日**｜**${entry.sizeMm.toFixed(2)} mm**`
   ].join("\n");
 }
 
 export function deathLogContent(death: DeadMarimo): string {
   return [
-    `🥀 <@${death.userId}> の **${displayMarimoName(death.name)}** は枯れてしまいました`,
+    `🥀 ${ownerLink(death.userId, death.ownerDisplayName)} の **${displayMarimoName(death.name)}** は枯れてしまいました`,
     `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
   ].join("\n");
 }

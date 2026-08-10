@@ -1,7 +1,6 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import {
-  MessageFlags,
   PermissionFlagsBits,
   PermissionsBitField,
   TextChannel,
@@ -14,12 +13,7 @@ import type { Config } from "../config/env.js";
 import type { MarimoRepository } from "../db/repository.js";
 import type { GuildConfig, RankingEntry, Watering } from "../domain/types.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
-import {
-  isMarimoImageLog,
-  MarimoBot,
-  missingLogPermissions,
-  silentUserMentions
-} from "./bot.js";
+import { isMarimoImageLog, MarimoBot, missingLogPermissions } from "./bot.js";
 import { NAME_BUTTON_ID, NAME_MODAL_ID } from "./presentation.js";
 
 const config: Config = {
@@ -172,13 +166,6 @@ function textChannelWithSend(
 }
 
 describe("panel interaction wiring", () => {
-  it("parses user mentions without sending notifications", () => {
-    expect(silentUserMentions(["2001", "2001", "2002"])).toEqual({
-      allowedMentions: { users: ["2001", "2002"] },
-      flags: MessageFlags.SuppressNotifications
-    });
-  });
-
   it("recognizes only this bot's marimo image logs for deletion", () => {
     expect(isMarimoImageLog(logMessage("bot", "marimo-tank.png"), "bot")).toBe(
       true
