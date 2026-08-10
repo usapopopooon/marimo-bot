@@ -23,6 +23,7 @@ export type Watering = {
   sizeMm: number;
   ageDays: number;
   awardedXp: number;
+  isBirth: boolean;
 };
 
 export type PendingWateringLog = Watering & {

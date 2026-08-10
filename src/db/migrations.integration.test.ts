@@ -62,6 +62,18 @@ suite("database migration upgrade", () => {
           "utf8"
         )
       );
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "004_watering_birth.sql"),
+          "utf8"
+        )
+      );
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "005_xp_delivery_fairness.sql"),
+          "utf8"
+        )
+      );
       const repository = new MarimoRepository(pool);
       await repository.backfillWateringXp(100);
       await repository.backfillWateringXp(100);
@@ -86,6 +98,19 @@ suite("database migration upgrade", () => {
           source_watering_event_id: eventId
         }
       ]);
+      const watering = await pool.query<{ is_birth: boolean }>(
+        "SELECT is_birth FROM marimo_waterings WHERE event_id = $1",
+        [eventId]
+      );
+      expect(watering.rows).toEqual([{ is_birth: true }]);
+      const pendingIndex = await pool.query<{ indexdef: string }>(
+        `SELECT indexdef FROM pg_indexes
+         WHERE schemaname = current_schema()
+           AND indexname = 'ix_marimo_xp_awards_pending'`
+      );
+      expect(pendingIndex.rows[0]?.indexdef).toContain(
+        "(delivery_attempts, created_at)"
+      );
     } finally {
       await pool.end();
       await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);

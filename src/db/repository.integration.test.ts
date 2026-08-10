@@ -36,6 +36,14 @@ suite("MarimoRepository integration", () => {
       now: new Date("2026-08-10T08:00:00Z"),
       awardedXp: 100
     });
+    const continued = await repository.water({
+      guildId: "1001",
+      userId: "2001",
+      channelId: "3001",
+      displayName: "客",
+      now: new Date("2026-08-11T03:00:00Z"),
+      awardedXp: 100
+    });
     const nextGeneration = await repository.water({
       guildId: "1001",
       userId: "2001",
@@ -47,15 +55,21 @@ suite("MarimoRepository integration", () => {
 
     expect(first.status).toBe("watered");
     expect(duplicate.status).toBe("already-watered");
+    expect(continued.status).toBe("watered");
     expect(nextGeneration.status).toBe("watered");
+    if (first.status !== "watered" || continued.status !== "watered")
+      throw new Error("expected watering");
     if (nextGeneration.status !== "watered")
       throw new Error("expected watering");
+    expect(first.watering.isBirth).toBe(true);
+    expect(continued.watering.isBirth).toBe(false);
     expect(nextGeneration.death?.generation).toBe(1);
     expect(nextGeneration.watering.marimo.generation).toBe(2);
+    expect(nextGeneration.watering.isBirth).toBe(true);
 
     const awards = await repository.pendingXp();
-    expect(awards).toHaveLength(2);
-    expect(awards.map((award) => award.awardedXp)).toEqual([100, 100]);
+    expect(awards).toHaveLength(3);
+    expect(awards.map((award) => award.awardedXp)).toEqual([100, 100, 100]);
 
     const rankings = await repository.rankings(
       "1001",
@@ -67,7 +81,12 @@ suite("MarimoRepository integration", () => {
     const pendingLogs = (await repository.pendingWateringLogs()).filter(
       (watering) => watering.marimo.guildId === "1001"
     );
-    expect(pendingLogs).toHaveLength(2);
+    expect(pendingLogs).toHaveLength(3);
+    expect(pendingLogs.map((watering) => watering.isBirth)).toEqual([
+      true,
+      false,
+      true
+    ]);
     const firstLog = pendingLogs[0];
     if (firstLog === undefined) throw new Error("expected watering log");
     await repository.markWateringLogFailed(firstLog.eventId, "send failed");
@@ -84,7 +103,7 @@ suite("MarimoRepository integration", () => {
     ).toBe(false);
     await repository.markGuildWateringLogsDeliveredThrough(
       "1001",
-      new Date("2026-08-11T00:00:00Z")
+      new Date("2026-08-11T04:00:00Z")
     );
     expect(
       (await repository.pendingWateringLogs()).filter(
@@ -169,6 +188,7 @@ suite("MarimoRepository integration", () => {
       awardedXp: 10
     });
     if (uncertain.status !== "watered") throw new Error("expected watering");
+    await repository.markXpFailed(uncertain.watering.eventId, "timeout");
 
     await repository.backfillWateringXp(100);
     await repository.backfillWateringXp(100);
@@ -183,8 +203,7 @@ suite("MarimoRepository integration", () => {
       pending
         .filter((award) => award.guildId === "1005")
         .map((award) => award.awardedXp)
-        .sort((left, right) => left - right)
-    ).toEqual([10, 90]);
+    ).toEqual([90, 10]);
   });
 
   it("clears the retired age leaderboard configuration", async () => {

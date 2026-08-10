@@ -42,6 +42,7 @@ type WateringLogRow = MarimoRow & {
   size_mm: string | number;
   awarded_xp: number;
   log_delivery_attempts: number;
+  is_birth: boolean;
 };
 
 const panelColumns: Record<PanelKind, { channel: string; message: string }> = {
@@ -154,7 +155,8 @@ export class MarimoRepository {
         };
       }
 
-      if (active === null) {
+      const isBirth = active === null;
+      if (isBirth) {
         active = await this.createGeneration(client, input);
       } else {
         const updated = await client.query<MarimoRow>(
@@ -173,8 +175,9 @@ export class MarimoRepository {
       await client.query(
         `INSERT INTO marimo_waterings (
            event_id, marimo_id, guild_id, user_id, channel_id,
-           watered_date, watered_at, size_mm, awarded_xp, log_delivery_status
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')`,
+           watered_date, watered_at, size_mm, awarded_xp,
+           log_delivery_status, is_birth
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)`,
         [
           eventId,
           active.id,
@@ -184,7 +187,8 @@ export class MarimoRepository {
           today,
           input.now,
           currentSize,
-          input.awardedXp
+          input.awardedXp,
+          isBirth
         ]
       );
       await client.query(
@@ -211,7 +215,8 @@ export class MarimoRepository {
           wateredDate: today,
           sizeMm: currentSize,
           ageDays: ageDays(active.bornAt, input.now),
-          awardedXp: input.awardedXp
+          awardedXp: input.awardedXp,
+          isBirth
         },
         ...(death === undefined ? {} : { death })
       };
@@ -425,7 +430,7 @@ export class MarimoRepository {
 
   public async pendingWateringLogs(limit = 25): Promise<PendingWateringLog[]> {
     const result = await this.pool.query<WateringLogRow>(
-      `SELECT w.event_id, w.watered_at, w.watered_date, w.size_mm,
+      `SELECT w.event_id, w.watered_at, w.watered_date, w.size_mm, w.is_birth,
               w.awarded_xp, w.log_delivery_attempts,
               m.id, m.guild_id, m.user_id, m.generation,
               m.owner_display_name, m.name, m.born_at,
@@ -445,6 +450,7 @@ export class MarimoRepository {
       sizeMm: Number(row.size_mm),
       ageDays: ageDays(new Date(row.born_at), new Date(row.watered_at)),
       awardedXp: row.awarded_xp,
+      isBirth: row.is_birth,
       deliveryAttempts: row.log_delivery_attempts
     }));
   }
@@ -502,7 +508,7 @@ export class MarimoRepository {
     >(
       `SELECT * FROM marimo_xp_awards
        WHERE delivery_status = 'pending'
-       ORDER BY created_at ASC LIMIT $1`,
+       ORDER BY delivery_attempts ASC, created_at ASC LIMIT $1`,
       [limit]
     );
     return result.rows.map((row) => ({

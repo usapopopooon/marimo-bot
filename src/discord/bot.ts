@@ -28,6 +28,7 @@ import { renderTankImage } from "../rendering/tank.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
 import {
+  displayMarimoName,
   nameModal,
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
@@ -36,6 +37,7 @@ import {
   STATUS_BUTTON_ID,
   statusContent,
   WATER_BUTTON_ID,
+  wateringLogContent,
   waterPanel
 } from "./presentation.js";
 
@@ -180,12 +182,22 @@ export class MarimoBot {
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
       if (interaction.isButton()) {
+        const isMarimoPanelButton = [
+          WATER_BUTTON_ID,
+          STATUS_BUTTON_ID,
+          NAME_BUTTON_ID
+        ].includes(interaction.customId);
+        if (
+          isMarimoPanelButton &&
+          !(await this.ensureCurrentWaterPanel(interaction))
+        )
+          return;
         if (interaction.customId === WATER_BUTTON_ID)
           await this.handleWater(interaction);
         if (interaction.customId === STATUS_BUTTON_ID)
           await this.handleButtonStatus(interaction);
         if (interaction.customId === NAME_BUTTON_ID)
-          await interaction.showModal(nameModal());
+          await this.handleNameButton(interaction);
         return;
       }
       if (interaction.isModalSubmit()) {
@@ -215,6 +227,24 @@ export class MarimoBot {
     }
   }
 
+  private async ensureCurrentWaterPanel(
+    interaction: ButtonInteraction
+  ): Promise<boolean> {
+    if (interaction.guildId === null) return true;
+    const config = await this.repository.getConfig(interaction.guildId);
+    const isCurrent =
+      config.waterPanelChannelId === interaction.channelId &&
+      config.waterPanelMessageId === interaction.message.id;
+    if (!isCurrent) {
+      await interaction.reply({
+        content:
+          "このパネルは古いため操作できません。現在の水替えパネルを使ってください。",
+        ephemeral: true
+      });
+    }
+    return isCurrent;
+  }
+
   private async handleWater(interaction: ButtonInteraction): Promise<void> {
     if (interaction.guildId === null) {
       await interaction.reply({
@@ -238,7 +268,7 @@ export class MarimoBot {
       await interaction.editReply({
         content: [
           "今日はもう水を替えています。",
-          `**${result.marimo.name}**｜生後${result.ageDays}日｜${result.sizeMm.toFixed(2)} mm`
+          `**${displayMarimoName(result.marimo.name)}**｜生後${result.ageDays}日｜${result.sizeMm.toFixed(2)} mm`
         ].join("\n")
       });
       return;
@@ -257,13 +287,11 @@ export class MarimoBot {
     this.runInBackground("Immediate XP delivery", () =>
       this.xpDelivery.deliverPending()
     );
-    const born =
-      result.watering.marimo.generation === 1 && result.watering.ageDays === 1;
     await interaction.editReply({
       content: [
         result.death === undefined
-          ? born
-            ? `**${result.watering.marimo.name}** が生まれました。`
+          ? result.watering.isBirth
+            ? `**${displayMarimoName(result.watering.marimo.name)}** が生まれました。`
             : "水がきれいになりました。"
           : `先代は枯れてしまいました。第${result.watering.marimo.generation}世代が生まれました。`,
         `生後 **${result.watering.ageDays}日**｜**${result.watering.sizeMm.toFixed(2)} mm**`,
@@ -290,10 +318,36 @@ export class MarimoBot {
     await interaction.reply({
       content:
         entry === null
-          ? "生きているまりもはいません。「水を替える」から育て始めましょう。"
+          ? "生きているまりもはいません。「育て始める・水を替える」から始めましょう。"
           : statusContent(entry),
       ephemeral: true
     });
+  }
+
+  private async handleNameButton(
+    interaction: ButtonInteraction
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    const entry = await this.repository.getLiving(
+      interaction.guildId,
+      interaction.user.id,
+      new Date()
+    );
+    if (entry === null) {
+      await interaction.reply({
+        content:
+          "先に「育て始める・水を替える」からまりもを育て始めてください。",
+        ephemeral: true
+      });
+      return;
+    }
+    await interaction.showModal(nameModal());
   }
 
   private async handleNameModal(
@@ -315,7 +369,8 @@ export class MarimoBot {
     );
     if (entry === null) {
       await interaction.reply({
-        content: "生きているまりもがいません。先に水を替えてください。",
+        content:
+          "生きているまりもがいません。先に「育て始める・水を替える」から始めてください。",
         ephemeral: true
       });
       return;
@@ -340,7 +395,7 @@ export class MarimoBot {
     }
     await interaction.reply({
       content: renamed
-        ? `まりもの名前を **${name}** に変更しました。`
+        ? `まりもの名前を **${displayMarimoName(name)}** に変更しました。`
         : "生きているまりもがいません。先に水替えパネルから育て始めてください。",
       ephemeral: true
     });
@@ -434,10 +489,21 @@ export class MarimoBot {
       });
       return;
     }
+    const botUserId = this.client.user?.id;
+    if (botUserId === undefined) throw new Error("Discord client is not ready");
+    const missing = missingLogPermissions(
+      interaction.channel.permissionsFor(botUserId)
+    ).filter((permission) => permission !== "ファイルを添付");
+    if (missing.length > 0) {
+      await interaction.reply({
+        content: `このチャンネルでBotに必要な権限がありません: ${missing.join("、")}`,
+        ephemeral: true
+      });
+      return;
+    }
     await interaction.deferReply({ ephemeral: true });
     const kind = interaction.options.getString("type", true) as PanelKind;
     const oldConfig = await this.repository.getConfig(interaction.guildId);
-    await this.deactivateOldPanel(oldConfig, kind);
     const now = new Date();
     const entries = await this.repository.rankings(interaction.guildId, now);
     const payload =
@@ -458,6 +524,7 @@ export class MarimoBot {
       interaction.channel.id,
       message.id
     );
+    await this.deactivateOldPanel(oldConfig, kind);
     await interaction.editReply({ content: "常設パネルを投稿しました。" });
   }
 
@@ -546,7 +613,7 @@ export class MarimoBot {
     });
     await channel.send({
       content: [
-        `🟢 <@${entry.userId}> の **${entry.name}**`,
+        `🟢 <@${entry.userId}> の **${displayMarimoName(entry.name)}**`,
         `第${entry.generation}世代｜生後 **${entry.ageDays}日**｜**${entry.sizeMm.toFixed(2)} mm**`
       ].join("\n"),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
@@ -702,10 +769,7 @@ export class MarimoBot {
       ageDays: watering.ageDays
     });
     await channel.send({
-      content: [
-        `🫧 <@${watering.marimo.userId}> が **${watering.marimo.name}** の水を替えました`,
-        `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`
-      ].join("\n"),
+      content: wateringLogContent(watering),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
       allowedMentions: { parse: [] }
     });
@@ -753,7 +817,7 @@ export class MarimoBot {
     });
     await channel.send({
       content: [
-        `🥀 <@${death.userId}> の **${death.name}** は枯れてしまいました`,
+        `🥀 <@${death.userId}> の **${displayMarimoName(death.name)}** は枯れてしまいました`,
         `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
       ].join("\n"),
       files: [new AttachmentBuilder(image, { name: "marimo-memorial.png" })],

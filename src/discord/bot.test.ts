@@ -58,7 +58,8 @@ const watering: Watering = {
   wateredDate: "2026-08-10",
   sizeMm: 10,
   ageDays: 1,
-  awardedXp: 100
+  awardedXp: 100,
+  isBirth: false
 };
 
 type InteractionDispatcher = {
@@ -93,6 +94,15 @@ type LogRefresher = {
 
 type ClientAccessor = {
   client: { user: { id: string } | null };
+};
+
+type PanelPoster = {
+  client: { user: { id: string } | null };
+  postPanel(interaction: ChatInputCommandInteraction): Promise<void>;
+  deactivateOldPanel(
+    config: GuildConfig,
+    kind: "water" | "size"
+  ): Promise<void>;
 };
 
 function botWith(repository: Partial<MarimoRepository>): MarimoBot {
@@ -135,6 +145,24 @@ function logChannel(
   return channel;
 }
 
+function textChannelWithSend(
+  send: (...args: unknown[]) => Promise<unknown>,
+  flags: bigint[] = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages
+  ]
+): TextChannel {
+  const channel = Object.create(TextChannel.prototype) as TextChannel;
+  Object.defineProperties(channel, {
+    id: { value: "3001" },
+    send: { value: send },
+    permissionsFor: {
+      value: () => new PermissionsBitField(flags)
+    }
+  });
+  return channel;
+}
+
 describe("panel interaction wiring", () => {
   it("recognizes only this bot's marimo image logs for deletion", () => {
     expect(isMarimoImageLog(logMessage("bot", "marimo-tank.png"), "bot")).toBe(
@@ -166,16 +194,148 @@ describe("panel interaction wiring", () => {
     const showModal = vi
       .fn<(modal: ModalBuilder) => Promise<void>>()
       .mockResolvedValue(undefined);
-    await dispatch(botWith({}), {
-      isButton: () => true,
-      customId: NAME_BUTTON_ID,
-      showModal
-    });
+    await dispatch(
+      botWith({
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        getLiving: vi.fn().mockResolvedValue(living)
+      }),
+      {
+        isButton: () => true,
+        customId: NAME_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        showModal
+      }
+    );
 
     expect(showModal).toHaveBeenCalledOnce();
     expect(showModal.mock.calls[0]?.[0].toJSON()).toMatchObject({
       custom_id: NAME_MODAL_ID
     });
+  });
+
+  it("rejects a copied or superseded panel before changing data", async () => {
+    const getLiving = vi.fn().mockResolvedValue(living);
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const showModal = vi.fn().mockResolvedValue(undefined);
+    await dispatch(
+      botWith({
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "current-message"
+        }),
+        getLiving
+      }),
+      {
+        isButton: () => true,
+        customId: NAME_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "old-message" },
+        user: { id: "2001" },
+        reply,
+        showModal
+      }
+    );
+
+    expect(reply).toHaveBeenCalledWith({
+      content:
+        "このパネルは古いため操作できません。現在の水替えパネルを使ってください。",
+      ephemeral: true
+    });
+    expect(getLiving).not.toHaveBeenCalled();
+    expect(showModal).not.toHaveBeenCalled();
+  });
+
+  it("asks the user to start raising before opening the name modal", async () => {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const showModal = vi.fn().mockResolvedValue(undefined);
+    await dispatch(
+      botWith({
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        getLiving: vi.fn().mockResolvedValue(null)
+      }),
+      {
+        isButton: () => true,
+        customId: NAME_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        reply,
+        showModal
+      }
+    );
+
+    expect(reply).toHaveBeenCalledWith({
+      content: "先に「育て始める・水を替える」からまりもを育て始めてください。",
+      ephemeral: true
+    });
+    expect(showModal).not.toHaveBeenCalled();
+  });
+
+  it("keeps the old panel active if posting its replacement fails", async () => {
+    const setPanel = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue(guildConfig),
+      rankings: vi.fn().mockResolvedValue([]),
+      setPanel
+    }) as unknown as PanelPoster;
+    Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
+    const deactivateOldPanel = vi.fn().mockResolvedValue(undefined);
+    bot.deactivateOldPanel = deactivateOldPanel;
+    const send = vi.fn().mockRejectedValue(new Error("Discord send failed"));
+
+    await expect(
+      bot.postPanel({
+        guildId: "1001",
+        channel: textChannelWithSend(send),
+        options: { getString: () => "water" },
+        deferReply: vi.fn().mockResolvedValue(undefined)
+      } as unknown as ChatInputCommandInteraction)
+    ).rejects.toThrow("Discord send failed");
+
+    expect(setPanel).not.toHaveBeenCalled();
+    expect(deactivateOldPanel).not.toHaveBeenCalled();
+  });
+
+  it("records a new panel before disabling the previous one", async () => {
+    const setPanel = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue(guildConfig),
+      rankings: vi.fn().mockResolvedValue([]),
+      setPanel
+    }) as unknown as PanelPoster;
+    Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
+    const deactivateOldPanel = vi.fn().mockResolvedValue(undefined);
+    bot.deactivateOldPanel = deactivateOldPanel;
+    const send = vi.fn().mockResolvedValue({ id: "new-message" });
+
+    await bot.postPanel({
+      guildId: "1001",
+      channel: textChannelWithSend(send),
+      options: { getString: () => "water" },
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply: vi.fn().mockResolvedValue(undefined)
+    } as unknown as ChatInputCommandInteraction);
+
+    expect(send.mock.invocationCallOrder[0]).toBeLessThan(
+      setPanel.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+    expect(setPanel.mock.invocationCallOrder[0]).toBeLessThan(
+      deactivateOldPanel.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
   });
 
   it("updates only the combined size leaderboard", async () => {

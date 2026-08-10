@@ -9,6 +9,8 @@ export type XpRepository = Pick<
 >;
 
 export class XpDelivery {
+  private readonly inFlight = new Set<string>();
+
   public constructor(
     private readonly repository: XpRepository,
     private readonly config: Config,
@@ -26,6 +28,8 @@ export class XpDelivery {
   }
 
   private async deliver(award: XpAward): Promise<void> {
+    if (this.inFlight.has(award.eventId)) return;
+    this.inFlight.add(award.eventId);
     try {
       const url = this.config.XP_WEBHOOK_URL;
       if (url === undefined) return;
@@ -58,6 +62,8 @@ export class XpDelivery {
         { err: error, eventId: award.eventId },
         "XP delivery failed"
       );
+    } finally {
+      this.inFlight.delete(award.eventId);
     }
   }
 }

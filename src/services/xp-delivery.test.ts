@@ -67,4 +67,35 @@ describe("XP delivery wiring", () => {
     });
     expect(delivered).toEqual([award.eventId]);
   });
+
+  it("does not send the same award twice when delivery runs overlap", async () => {
+    const repository: XpRepository = {
+      pendingXp: vi.fn().mockResolvedValue([award]),
+      markXpDelivered: vi.fn().mockResolvedValue(undefined),
+      markXpFailed: vi.fn().mockResolvedValue(undefined)
+    };
+    let finishRequest: (() => void) | undefined;
+    const requestPending = new Promise<void>((resolve) => {
+      finishRequest = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => {
+      await requestPending;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const delivery = new XpDelivery(
+      repository,
+      config(),
+      pino({ level: "silent" })
+    );
+
+    const first = delivery.deliverPending();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const second = delivery.deliverPending();
+    finishRequest?.();
+    await Promise.all([first, second]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(repository.markXpDelivered).toHaveBeenCalledOnce();
+  });
 });

@@ -2,18 +2,23 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  escapeMarkdown,
   LabelBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle
 } from "discord.js";
-import type { RankingEntry } from "../domain/types.js";
+import type { RankingEntry, Watering } from "../domain/types.js";
 
 export const WATER_BUTTON_ID = "marimo:water";
 export const STATUS_BUTTON_ID = "marimo:status";
 export const NAME_BUTTON_ID = "marimo:name";
 export const NAME_MODAL_ID = "marimo:name-modal";
 export const NAME_INPUT_ID = "marimo:name-input";
+
+export function displayMarimoName(name: string): string {
+  return escapeMarkdown(name);
+}
 
 export function waterPanel(waterXp: number): {
   content: string;
@@ -38,8 +43,8 @@ export function waterPanel(waterXp: number): {
     content: [
       "# 🟢 まりもちゃん",
       "まりもは時間とともに、どこまでも大きくなります。",
-      "初めての人はボタンを押すと、自分のまりもが生まれます。",
-      `以後は1日1回水を替えると **${waterXp} XP**。丸一日忘れると枯れてしまい、次の世代へリセットされます。`,
+      `初回は自分のまりもが生まれ、**${waterXp} XP**を獲得します。`,
+      `以後も1日1回水を替えると **${waterXp} XP**。丸一日忘れると枯れてしまい、次の世代へリセットされます。`,
       "",
       "-# 日付は日本時間の0:00に切り替わります"
     ].join("\n"),
@@ -65,7 +70,7 @@ export function nameModal(): ModalBuilder {
 }
 
 function leaderboardLine(entry: RankingEntry, rank: number): string {
-  return `${rank}. <@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm（生後${entry.ageDays}日）**｜${entry.name}`;
+  return `${rank}. <@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm（生後${entry.ageDays}日）**｜${displayMarimoName(entry.name)}`;
 }
 
 export function rankingContent(
@@ -93,11 +98,20 @@ export function rankingContent(
 
 export function statusContent(entry: RankingEntry): string {
   return [
-    `# 🟢 ${entry.name}`,
+    `# 🟢 ${displayMarimoName(entry.name)}`,
     `第${entry.generation}世代｜生後 **${entry.ageDays}日**`,
     `大きさ **${entry.sizeMm.toFixed(2)} mm**`,
     `最後の水替え **${entry.lastWateredDate}**`,
     "",
     "-# 水を替えない日が丸一日続くと枯れてしまいます"
+  ].join("\n");
+}
+
+export function wateringLogContent(watering: Watering): string {
+  return [
+    watering.isBirth
+      ? `🟢 <@${watering.marimo.userId}> の **${displayMarimoName(watering.marimo.name)}** が生まれました`
+      : `🫧 <@${watering.marimo.userId}> が **${displayMarimoName(watering.marimo.name)}** の水を替えました`,
+    `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`
   ].join("\n");
 }
