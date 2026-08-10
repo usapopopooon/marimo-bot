@@ -17,7 +17,6 @@ const award: XpAward = {
 function config(): Config {
   return {
     DISCORD_TOKEN: "token",
-    DISCORD_CLIENT_ID: "123",
     DATABASE_URL: "postgresql://localhost/marimo",
     DATABASE_REQUIRE_SSL: false,
     WATER_XP: 10,

@@ -14,8 +14,6 @@ function optionalEnvironmentValue<T extends z.ZodTypeAny>(schema: T) {
 
 const schema = z.object({
   DISCORD_TOKEN: z.string().min(1),
-  DISCORD_CLIENT_ID: z.string().regex(/^\d+$/),
-  DISCORD_GUILD_ID: optionalEnvironmentValue(z.string().regex(/^\d+$/)),
   DATABASE_URL: z.string().url(),
   DATABASE_REQUIRE_SSL: booleanString,
   WATER_XP: z.coerce.number().int().min(1).max(1000).default(10),

@@ -74,26 +74,13 @@ export class MarimoBot {
   ) {}
 
   public async start(): Promise<void> {
-    await this.registerCommands();
     this.client.on(Events.InteractionCreate, (interaction) => {
       void this.handleInteraction(interaction);
     });
     this.client.once(Events.ClientReady, (readyClient) => {
       this.logger.info({ user: readyClient.user.tag }, "Discord client ready");
-      this.runInBackground("Startup maintenance", () => this.runMaintenance());
-      this.sweepTimer = setInterval(
-        () =>
-          this.runInBackground("Scheduled death sweep", () =>
-            this.expireNeglected()
-          ),
-        5 * 60_000
-      );
-      this.xpTimer = setInterval(
-        () =>
-          this.runInBackground("Scheduled XP delivery", () =>
-            this.xpDelivery.deliverPending()
-          ),
-        60_000
+      this.runInBackground("Client startup", () =>
+        this.finishStartup(readyClient.user.id)
       );
     });
     await this.client.login(this.config.DISCORD_TOKEN);
@@ -105,20 +92,31 @@ export class MarimoBot {
     await this.client.destroy();
   }
 
-  private async registerCommands(): Promise<void> {
-    const rest = new REST().setToken(this.config.DISCORD_TOKEN);
-    const route =
-      this.config.DISCORD_GUILD_ID === undefined
-        ? Routes.applicationCommands(this.config.DISCORD_CLIENT_ID)
-        : Routes.applicationGuildCommands(
-            this.config.DISCORD_CLIENT_ID,
-            this.config.DISCORD_GUILD_ID
-          );
-    await rest.put(route, { body: commands });
-    this.logger.info(
-      { scope: this.config.DISCORD_GUILD_ID ?? "global" },
-      "Application commands registered"
+  private async finishStartup(applicationId: string): Promise<void> {
+    await this.registerCommands(applicationId);
+    await this.runMaintenance();
+    this.sweepTimer = setInterval(
+      () =>
+        this.runInBackground("Scheduled death sweep", () =>
+          this.expireNeglected()
+        ),
+      5 * 60_000
     );
+    this.xpTimer = setInterval(
+      () =>
+        this.runInBackground("Scheduled XP delivery", () =>
+          this.xpDelivery.deliverPending()
+        ),
+      60_000
+    );
+  }
+
+  private async registerCommands(applicationId: string): Promise<void> {
+    const rest = new REST().setToken(this.config.DISCORD_TOKEN);
+    await rest.put(Routes.applicationCommands(applicationId), {
+      body: commands
+    });
+    this.logger.info({ scope: "global" }, "Application commands registered");
   }
 
   private async handleInteraction(interaction: Interaction): Promise<void> {

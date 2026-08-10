@@ -64,8 +64,7 @@ docker compose up -d db
 npm run dev
 ```
 
-開発サーバーだけにコマンドを即時登録する場合は `.env` の `DISCORD_GUILD_ID` を設定する。
-未指定時はグローバルコマンドとして登録され、Discordへの反映に時間がかかる場合がある。
+Slash CommandはBotログイン後に自身のApplication IDを使ってグローバル登録される。
 
 ## 検証
 
