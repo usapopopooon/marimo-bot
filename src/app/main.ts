@@ -15,6 +15,7 @@ const pool = new Pool({
 
 await runMigrations(pool);
 const repository = new MarimoRepository(pool);
+await repository.backfillWateringXp(config.WATER_XP);
 const xpDelivery = new XpDelivery(repository, config, logger);
 const bot = new MarimoBot(repository, xpDelivery, config, logger);
 

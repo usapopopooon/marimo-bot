@@ -9,7 +9,7 @@ const award: XpAward = {
   guildId: "1001",
   userId: "2001",
   channelId: "3001",
-  awardedXp: 10,
+  awardedXp: 100,
   observedAt: new Date("2026-08-10T03:00:00Z"),
   deliveryAttempts: 0
 };
@@ -19,7 +19,7 @@ function config(): Config {
     DISCORD_TOKEN: "token",
     DATABASE_URL: "postgresql://localhost/marimo",
     DATABASE_REQUIRE_SSL: false,
-    WATER_XP: 10,
+    WATER_XP: 100,
     XP_WEBHOOK_URL: "https://level.example.test/api/marimo",
     XP_WEBHOOK_TOKEN: "secret",
     LOG_LEVEL: "silent"
@@ -62,7 +62,7 @@ describe("XP delivery wiring", () => {
       guild_id: "1001",
       user_id: "2001",
       channel_id: "3001",
-      awarded_xp: 10,
+      awarded_xp: 100,
       observed_at: "2026-08-10T03:00:00.000Z"
     });
     expect(delivered).toEqual([award.eventId]);

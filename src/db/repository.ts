@@ -189,8 +189,9 @@ export class MarimoRepository {
       );
       await client.query(
         `INSERT INTO marimo_xp_awards (
-           event_id, guild_id, user_id, channel_id, awarded_xp, observed_at
-         ) VALUES ($1, $2, $3, $4, $5, $6)`,
+           event_id, source_watering_event_id, award_kind,
+           guild_id, user_id, channel_id, awarded_xp, observed_at
+         ) VALUES ($1, $1, 'watering', $2, $3, $4, $5, $6)`,
         [
           eventId,
           input.guildId,
@@ -513,6 +514,22 @@ export class MarimoRepository {
       observedAt: new Date(row.observed_at),
       deliveryAttempts: row.delivery_attempts
     }));
+  }
+
+  public async backfillWateringXp(targetXp: number): Promise<void> {
+    const awardKind = `compensation:${targetXp}`;
+    await this.pool.query(
+      `INSERT INTO marimo_xp_awards (
+         event_id, source_watering_event_id, award_kind,
+         guild_id, user_id, channel_id, awarded_xp, observed_at
+       )
+       SELECT gen_random_uuid(), event_id, $2,
+              guild_id, user_id, channel_id, $1 - awarded_xp, NOW()
+       FROM marimo_xp_awards
+       WHERE award_kind = 'watering' AND awarded_xp < $1
+       ON CONFLICT (source_watering_event_id, award_kind) DO NOTHING`,
+      [targetXp, awardKind]
+    );
   }
 
   public async markXpDelivered(eventId: string): Promise<void> {

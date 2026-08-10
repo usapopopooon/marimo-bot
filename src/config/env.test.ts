@@ -16,7 +16,7 @@ describe("environment config", () => {
 
     expect(config.XP_WEBHOOK_URL).toBeUndefined();
     expect(config.XP_WEBHOOK_TOKEN).toBeUndefined();
-    expect(config.WATER_XP).toBe(10);
+    expect(config.WATER_XP).toBe(100);
   });
 
   it("keeps configured XP integration values", () => {
@@ -25,10 +25,10 @@ describe("environment config", () => {
       XP_WEBHOOK_URL:
         "https://level.example.test/api/v1/integrations/marimo/watering-events",
       XP_WEBHOOK_TOKEN: "shared-secret",
-      WATER_XP: "10"
+      WATER_XP: "100"
     });
 
     expect(config.XP_WEBHOOK_TOKEN).toBe("shared-secret");
-    expect(config.WATER_XP).toBe(10);
+    expect(config.WATER_XP).toBe(100);
   });
 });

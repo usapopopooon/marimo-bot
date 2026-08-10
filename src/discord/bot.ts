@@ -75,6 +75,48 @@ export function isMarimoImageLog(message: Message, botUserId: string): boolean {
   );
 }
 
+type PermissionChecker = {
+  has(permission: bigint): boolean;
+};
+
+const LOG_POST_PERMISSIONS = [
+  [PermissionFlagsBits.ViewChannel, "チャンネルを見る"],
+  [PermissionFlagsBits.SendMessages, "メッセージを送信"],
+  [PermissionFlagsBits.AttachFiles, "ファイルを添付"]
+] as const;
+
+export function missingLogPermissions(
+  permissions: PermissionChecker | null,
+  includeHistory = false
+): string[] {
+  const required = includeHistory
+    ? [
+        ...LOG_POST_PERMISSIONS,
+        [
+          PermissionFlagsBits.ReadMessageHistory,
+          "メッセージ履歴を読む"
+        ] as const
+      ]
+    : LOG_POST_PERMISSIONS;
+  if (permissions === null) {
+    return required.map(([, label]) => label);
+  }
+  return required
+    .filter(([permission]) => !permissions.has(permission))
+    .map(([, label]) => label);
+}
+
+function errorDetails(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { message: String(error) };
+  const coded = error as Error & { code?: unknown; status?: unknown };
+  return {
+    name: error.name,
+    message: error.message,
+    ...(coded.code === undefined ? {} : { code: coded.code }),
+    ...(coded.status === undefined ? {} : { status: coded.status })
+  };
+}
+
 export class MarimoBot {
   private readonly client = new Client({ intents: [GatewayIntentBits.Guilds] });
   private readonly wateringLogsInFlight = new Set<string>();
@@ -156,7 +198,7 @@ export class MarimoBot {
         await this.handleAdminCommand(interaction);
       }
     } catch (error) {
-      this.logger.error({ err: error }, "Interaction failed");
+      this.logger.error({ error: errorDetails(error) }, "Interaction failed");
       const content =
         "処理に失敗しました。しばらくしてからもう一度お試しください。";
       if (interaction.isRepliable()) {
@@ -331,6 +373,19 @@ export class MarimoBot {
         });
         return;
       }
+      const botUserId = this.client.user?.id;
+      if (botUserId === undefined)
+        throw new Error("Discord client is not ready");
+      const missing = missingLogPermissions(
+        interaction.channel.permissionsFor(botUserId)
+      );
+      if (missing.length > 0) {
+        await interaction.reply({
+          content: `このチャンネルでBotに必要な権限がありません: ${missing.join("、")}`,
+          ephemeral: true
+        });
+        return;
+      }
       await this.repository.setLogChannel(
         interaction.guildId,
         interaction.channelId
@@ -423,12 +478,18 @@ export class MarimoBot {
     const startedAt = new Date();
     const botUserId = this.client.user?.id;
     if (botUserId === undefined) throw new Error("Discord client is not ready");
-
-    await this.repository.setLogChannel(
-      interaction.guildId,
-      interaction.channelId
+    const missing = missingLogPermissions(
+      interaction.channel.permissionsFor(botUserId),
+      true
     );
-    await this.deleteMarimoLogs(interaction.channel, botUserId);
+    if (missing.length > 0) {
+      await interaction.editReply({
+        content: `このチャンネルでBotに必要な権限がありません: ${missing.join("、")}`
+      });
+      return;
+    }
+
+    const oldLogs = await this.findMarimoLogs(interaction.channel, botUserId);
     const entries = await this.repository.rankings(
       interaction.guildId,
       startedAt
@@ -439,6 +500,11 @@ export class MarimoBot {
     for (const entry of sorted) {
       await this.postCurrentMarimoLog(interaction.channel, entry);
     }
+    for (const oldLog of oldLogs) await oldLog.delete();
+    await this.repository.setLogChannel(
+      interaction.guildId,
+      interaction.channelId
+    );
     await this.repository.markGuildWateringLogsDeliveredThrough(
       interaction.guildId,
       startedAt
@@ -446,11 +512,12 @@ export class MarimoBot {
     await interaction.deleteReply();
   }
 
-  private async deleteMarimoLogs(
+  private async findMarimoLogs(
     channel: TextChannel,
     botUserId: string
-  ): Promise<void> {
+  ): Promise<Message[]> {
     let before: string | undefined;
+    const logs: Message[] = [];
     for (;;) {
       const messages = await channel.messages.fetch({
         limit: 100,
@@ -460,11 +527,12 @@ export class MarimoBot {
       const oldest = messages.last();
       for (const message of messages.values()) {
         if (!isMarimoImageLog(message, botUserId)) continue;
-        await message.delete();
+        logs.push(message);
       }
       if (messages.size < 100 || oldest === undefined) break;
       before = oldest.id;
     }
+    return logs;
   }
 
   private async postCurrentMarimoLog(
@@ -504,7 +572,7 @@ export class MarimoBot {
       })
       .catch((error: unknown) => {
         this.logger.warn(
-          { err: error, channelId, messageId },
+          { error: errorDetails(error), channelId, messageId },
           "Old panel disable failed"
         );
       });
@@ -598,7 +666,7 @@ export class MarimoBot {
       })
       .catch((error: unknown) => {
         this.logger.warn(
-          { err: error, channelId, messageId },
+          { error: errorDetails(error), channelId, messageId },
           "Ranking update failed"
         );
       });
@@ -614,7 +682,7 @@ export class MarimoBot {
       return await channel.messages.fetch(messageId);
     } catch (error) {
       this.logger.warn(
-        { err: error, channelId, messageId },
+        { error: errorDetails(error), channelId, messageId },
         "Message fetch failed"
       );
       return null;
@@ -734,7 +802,7 @@ export class MarimoBot {
       await task();
     } catch (error) {
       this.logger.error(
-        { err: error, operation },
+        { error: errorDetails(error), operation },
         "Discord side effect failed"
       );
     }
@@ -742,7 +810,10 @@ export class MarimoBot {
 
   private runInBackground(operation: string, task: () => Promise<void>): void {
     void task().catch((error: unknown) => {
-      this.logger.error({ err: error, operation }, "Background task failed");
+      this.logger.error(
+        { error: errorDetails(error), operation },
+        "Background task failed"
+      );
     });
   }
 }

@@ -1,0 +1,95 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { Pool } from "pg";
+import { describe, expect, it } from "vitest";
+import { MarimoRepository } from "./repository.js";
+
+const databaseUrl = process.env.TEST_DATABASE_URL;
+const suite = databaseUrl === undefined ? describe.skip : describe;
+
+suite("database migration upgrade", () => {
+  it("adds one 90 XP compensation to an existing 10 XP watering", async () => {
+    const admin = new Pool({ connectionString: databaseUrl });
+    const schema = "marimo_migration_upgrade_test";
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`
+    });
+
+    try {
+      for (const migration of [
+        "001_initial.sql",
+        "002_watering_log_delivery.sql"
+      ]) {
+        await pool.query(
+          await readFile(
+            resolve(process.cwd(), "migrations", migration),
+            "utf8"
+          )
+        );
+      }
+      const marimo = await pool.query<{ id: string }>(
+        `INSERT INTO marimos (
+           guild_id, user_id, generation, owner_display_name, name,
+           born_at, last_watered_at, last_watered_date
+         ) VALUES ('1001', '2001', 1, 'owner', 'まりも',
+                   '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10')
+         RETURNING id`
+      );
+      const marimoId = marimo.rows[0]?.id;
+      if (marimoId === undefined) throw new Error("expected marimo row");
+      const eventId = "00000000-0000-4000-8000-000000000001";
+      await pool.query(
+        `INSERT INTO marimo_waterings (
+           event_id, marimo_id, guild_id, user_id, channel_id,
+           watered_date, watered_at, size_mm, awarded_xp
+         ) VALUES ($1, $2, '1001', '2001', '3001',
+                   '2026-08-10', '2026-08-10T03:00:00Z', 10, 10)`,
+        [eventId, marimoId]
+      );
+      await pool.query(
+        `INSERT INTO marimo_xp_awards (
+           event_id, guild_id, user_id, channel_id, awarded_xp, observed_at
+         ) VALUES ($1, '1001', '2001', '3001', 10, '2026-08-10T03:00:00Z')`,
+        [eventId]
+      );
+
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "003_xp_compensation.sql"),
+          "utf8"
+        )
+      );
+      const repository = new MarimoRepository(pool);
+      await repository.backfillWateringXp(100);
+      await repository.backfillWateringXp(100);
+
+      const awards = await pool.query<{
+        awarded_xp: number;
+        award_kind: string;
+        source_watering_event_id: string;
+      }>(
+        `SELECT awarded_xp, award_kind, source_watering_event_id
+         FROM marimo_xp_awards ORDER BY awarded_xp`
+      );
+      expect(awards.rows).toEqual([
+        {
+          awarded_xp: 10,
+          award_kind: "watering",
+          source_watering_event_id: eventId
+        },
+        {
+          awarded_xp: 90,
+          award_kind: "compensation:100",
+          source_watering_event_id: eventId
+        }
+      ]);
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+});

@@ -21,6 +21,7 @@ assert.equal(
   services.bot.environment.XP_WEBHOOK_TOKEN,
   "${XP_WEBHOOK_TOKEN:-}"
 );
+assert.equal(services.bot.environment.WATER_XP, "100");
 for (const key of [
   "DISCORD_TOKEN",
   "WATER_XP",

@@ -31,7 +31,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/marimo
       DATABASE_REQUIRE_SSL: "false"
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
-      WATER_XP: ${WATER_XP:-10}
+      WATER_XP: "100"
       XP_WEBHOOK_URL: ${XP_WEBHOOK_URL:-}
       XP_WEBHOOK_TOKEN: ${XP_WEBHOOK_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}

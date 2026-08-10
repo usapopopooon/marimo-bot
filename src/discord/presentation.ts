@@ -64,8 +64,8 @@ export function nameModal(): ModalBuilder {
     .addLabelComponents(label);
 }
 
-function leaderboardLine(entry: RankingEntry, index: number): string {
-  return `${index + 1}. <@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm（生後${entry.ageDays}日）**｜${entry.name}`;
+function leaderboardLine(entry: RankingEntry, rank: number): string {
+  return `${rank}. <@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm（生後${entry.ageDays}日）**｜${entry.name}`;
 }
 
 export function rankingContent(
@@ -75,7 +75,14 @@ export function rankingContent(
   const sorted = [...entries]
     .sort((left, right) => right.sizeMm - left.sizeMm)
     .slice(0, 10);
-  const lines = sorted.map(leaderboardLine);
+  let rank = 0;
+  let previousSize: string | undefined;
+  const lines = sorted.map((entry, index) => {
+    const displayedSize = entry.sizeMm.toFixed(2);
+    if (displayedSize !== previousSize) rank = index + 1;
+    previousSize = displayedSize;
+    return leaderboardLine(entry, rank);
+  });
   return [
     "# 📏 巨大まりもランキング",
     lines.length === 0 ? "まだ生きているまりもはいません。" : lines.join("\n"),

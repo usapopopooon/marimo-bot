@@ -28,10 +28,10 @@ function entry(userId: string, age: number, size: number): RankingEntry {
 
 describe("Discord presentation", () => {
   it("explains the hard reset and exact daily XP", () => {
-    const panel = waterPanel(10);
+    const panel = waterPanel(100);
     expect(panel.content).toContain("自分のまりもが生まれます");
     expect(panel.content).toContain("1日1回");
-    expect(panel.content).toContain("10 XP");
+    expect(panel.content).toContain("100 XP");
     expect(panel.content).toContain("枯れてしまい");
     expect(panel.components[0]?.components).toHaveLength(3);
     expect(
@@ -76,5 +76,20 @@ describe("Discord presentation", () => {
     expect(ranking.indexOf("young-large")).toBeLessThan(
       ranking.indexOf("old-small")
     );
+  });
+
+  it("gives every displayed size tie the same rank", () => {
+    const ranking = rankingContent(
+      [
+        entry("same-a", 2, 99),
+        entry("same-b", 20, 99.001),
+        entry("smaller", 30, 12)
+      ],
+      new Date("2026-08-10T00:00:00Z")
+    );
+
+    expect(ranking).toContain("1. <@same-a>");
+    expect(ranking).toContain("1. <@same-b>");
+    expect(ranking).toContain("3. <@smaller>");
   });
 });

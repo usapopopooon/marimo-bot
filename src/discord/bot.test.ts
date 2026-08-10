@@ -1,6 +1,8 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import {
+  PermissionFlagsBits,
+  PermissionsBitField,
   TextChannel,
   type ChatInputCommandInteraction,
   type Interaction,
@@ -11,14 +13,14 @@ import type { Config } from "../config/env.js";
 import type { MarimoRepository } from "../db/repository.js";
 import type { GuildConfig, RankingEntry, Watering } from "../domain/types.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
-import { isMarimoImageLog, MarimoBot } from "./bot.js";
+import { isMarimoImageLog, MarimoBot, missingLogPermissions } from "./bot.js";
 import { NAME_BUTTON_ID, NAME_MODAL_ID } from "./presentation.js";
 
 const config: Config = {
   DISCORD_TOKEN: "token",
   DATABASE_URL: "postgresql://localhost/marimo",
   DATABASE_REQUIRE_SSL: false,
-  WATER_XP: 10,
+  WATER_XP: 100,
   XP_WEBHOOK_URL: undefined,
   XP_WEBHOOK_TOKEN: undefined,
   LOG_LEVEL: "silent"
@@ -56,7 +58,7 @@ const watering: Watering = {
   wateredDate: "2026-08-10",
   sizeMm: 10,
   ageDays: 1,
-  awardedXp: 10
+  awardedXp: 100
 };
 
 type InteractionDispatcher = {
@@ -82,11 +84,15 @@ type WateringLogDeliverer = {
 type LogRefresher = {
   client: { user: { id: string } | null };
   repostAllLogs(interaction: ChatInputCommandInteraction): Promise<void>;
-  deleteMarimoLogs(channel: TextChannel, botUserId: string): Promise<void>;
+  findMarimoLogs(channel: TextChannel, botUserId: string): Promise<Message[]>;
   postCurrentMarimoLog(
     channel: TextChannel,
     entry: RankingEntry
   ): Promise<void>;
+};
+
+type ClientAccessor = {
+  client: { user: { id: string } | null };
 };
 
 function botWith(repository: Partial<MarimoRepository>): MarimoBot {
@@ -114,6 +120,21 @@ function logMessage(authorId: string, attachmentName: string): Message {
   } as unknown as Message;
 }
 
+function logChannel(
+  flags: bigint[] = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.ReadMessageHistory
+  ]
+): TextChannel {
+  const channel = Object.create(TextChannel.prototype) as TextChannel;
+  Object.defineProperty(channel, "permissionsFor", {
+    value: () => new PermissionsBitField(flags)
+  });
+  return channel;
+}
+
 describe("panel interaction wiring", () => {
   it("recognizes only this bot's marimo image logs for deletion", () => {
     expect(isMarimoImageLog(logMessage("bot", "marimo-tank.png"), "bot")).toBe(
@@ -126,6 +147,19 @@ describe("panel interaction wiring", () => {
       false
     );
     expect(isMarimoImageLog(logMessage("bot", "other.png"), "bot")).toBe(false);
+  });
+
+  it("reports the exact missing image log permissions", () => {
+    const permissions = new PermissionsBitField([
+      PermissionFlagsBits.ViewChannel,
+      PermissionFlagsBits.SendMessages
+    ]);
+
+    expect(missingLogPermissions(permissions)).toEqual(["ファイルを添付"]);
+    expect(missingLogPermissions(permissions, true)).toEqual([
+      "ファイルを添付",
+      "メッセージ履歴を読む"
+    ]);
   });
 
   it("opens the naming modal from the panel button", async () => {
@@ -176,14 +210,17 @@ describe("panel interaction wiring", () => {
     const setLogChannel = vi.fn().mockResolvedValue(undefined);
     const reply = vi.fn().mockResolvedValue(undefined);
 
-    await dispatch(botWith({ setLogChannel }), {
+    const bot = botWith({ setLogChannel });
+    const client = (bot as unknown as ClientAccessor).client;
+    Object.defineProperty(client, "user", { value: { id: "bot" } });
+    await dispatch(bot, {
       isButton: () => false,
       isModalSubmit: () => false,
       isChatInputCommand: () => true,
       commandName: "marimo-admin",
       guildId: "1001",
       channelId: "3001",
-      channel: Object.create(TextChannel.prototype) as TextChannel,
+      channel: logChannel(),
       memberPermissions: { has: () => true },
       options: { getSubcommand: () => "log" },
       reply
@@ -234,11 +271,13 @@ describe("panel interaction wiring", () => {
     };
     const bot = botWith(repository) as unknown as LogRefresher;
     Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
-    const deleteMarimoLogs = vi.fn().mockResolvedValue(undefined);
+    const deleteOldLog = vi.fn().mockResolvedValue(undefined);
+    const oldLog = { delete: deleteOldLog } as unknown as Message;
+    const findMarimoLogs = vi.fn().mockResolvedValue([oldLog]);
     const postCurrentMarimoLog = vi.fn().mockResolvedValue(undefined);
-    bot.deleteMarimoLogs = deleteMarimoLogs;
+    bot.findMarimoLogs = findMarimoLogs;
     bot.postCurrentMarimoLog = postCurrentMarimoLog;
-    const channel = Object.create(TextChannel.prototype) as TextChannel;
+    const channel = logChannel();
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const deleteReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
@@ -253,10 +292,72 @@ describe("panel interaction wiring", () => {
     } as unknown as ChatInputCommandInteraction);
 
     expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
-    expect(deleteMarimoLogs).toHaveBeenCalledWith(channel, "bot");
+    expect(findMarimoLogs).toHaveBeenCalledWith(channel, "bot");
     expect(postCurrentMarimoLog).toHaveBeenCalledWith(channel, living);
+    expect(postCurrentMarimoLog.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteOldLog.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+    expect(deleteOldLog).toHaveBeenCalledOnce();
     expect(deleteReply).toHaveBeenCalledOnce();
     expect(editReply).not.toHaveBeenCalled();
+  });
+
+  it("does not change or delete logs when image permissions are missing", async () => {
+    const setLogChannel = vi.fn().mockResolvedValue(undefined);
+    const repository: Partial<MarimoRepository> = { setLogChannel };
+    const bot = botWith(repository) as unknown as LogRefresher;
+    Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
+    const findMarimoLogs = vi.fn().mockResolvedValue([]);
+    const postCurrentMarimoLog = vi.fn().mockResolvedValue(undefined);
+    bot.findMarimoLogs = findMarimoLogs;
+    bot.postCurrentMarimoLog = postCurrentMarimoLog;
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await bot.repostAllLogs({
+      guildId: "1001",
+      channelId: "3001",
+      channel: logChannel([
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory
+      ]),
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply
+    } as unknown as ChatInputCommandInteraction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: "このチャンネルでBotに必要な権限がありません: ファイルを添付"
+    });
+    expect(findMarimoLogs).not.toHaveBeenCalled();
+    expect(postCurrentMarimoLog).not.toHaveBeenCalled();
+    expect(setLogChannel).not.toHaveBeenCalled();
+  });
+
+  it("keeps every old log when a replacement post fails", async () => {
+    const setLogChannel = vi.fn().mockResolvedValue(undefined);
+    const repository: Partial<MarimoRepository> = {
+      setLogChannel,
+      rankings: vi.fn().mockResolvedValue([living])
+    };
+    const bot = botWith(repository) as unknown as LogRefresher;
+    Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
+    const deleteOldLog = vi.fn().mockResolvedValue(undefined);
+    bot.findMarimoLogs = vi.fn().mockResolvedValue([{ delete: deleteOldLog }]);
+    bot.postCurrentMarimoLog = vi
+      .fn()
+      .mockRejectedValue(new Error("Discord send failed"));
+
+    await expect(
+      bot.repostAllLogs({
+        guildId: "1001",
+        channelId: "3001",
+        channel: logChannel(),
+        deferReply: vi.fn().mockResolvedValue(undefined)
+      } as unknown as ChatInputCommandInteraction)
+    ).rejects.toThrow("Discord send failed");
+
+    expect(deleteOldLog).not.toHaveBeenCalled();
+    expect(setLogChannel).not.toHaveBeenCalled();
   });
 
   it("passes modal guild, user, and trimmed name to rename", async () => {

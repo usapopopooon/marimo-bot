@@ -26,7 +26,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-10T03:00:00Z"),
-      awardedXp: 10
+      awardedXp: 100
     });
     const duplicate = await repository.water({
       guildId: "1001",
@@ -34,7 +34,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-10T08:00:00Z"),
-      awardedXp: 10
+      awardedXp: 100
     });
     const nextGeneration = await repository.water({
       guildId: "1001",
@@ -42,7 +42,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-12T15:00:00Z"),
-      awardedXp: 10
+      awardedXp: 100
     });
 
     expect(first.status).toBe("watered");
@@ -55,7 +55,7 @@ suite("MarimoRepository integration", () => {
 
     const awards = await repository.pendingXp();
     expect(awards).toHaveLength(2);
-    expect(awards.map((award) => award.awardedXp)).toEqual([10, 10]);
+    expect(awards.map((award) => award.awardedXp)).toEqual([100, 100]);
 
     const rankings = await repository.rankings(
       "1001",
@@ -108,7 +108,7 @@ suite("MarimoRepository integration", () => {
       userId: "2002",
       channelId: "3002",
       displayName: "境界",
-      awardedXp: 10
+      awardedXp: 100
     };
     await repository.water({
       ...input,
@@ -147,6 +147,44 @@ suite("MarimoRepository integration", () => {
     expect(
       awards.filter((award) => award.guildId === input.guildId)
     ).toHaveLength(2);
+  });
+
+  it("grants the XP difference once for both delivered and uncertain old awards", async () => {
+    const delivered = await repository.water({
+      guildId: "1004",
+      userId: "2004",
+      channelId: "3004",
+      displayName: "配信済み",
+      now: new Date("2026-08-10T03:00:00Z"),
+      awardedXp: 10
+    });
+    if (delivered.status !== "watered") throw new Error("expected watering");
+    await repository.markXpDelivered(delivered.watering.eventId);
+    const uncertain = await repository.water({
+      guildId: "1005",
+      userId: "2005",
+      channelId: "3005",
+      displayName: "配信不明",
+      now: new Date("2026-08-10T03:00:00Z"),
+      awardedXp: 10
+    });
+    if (uncertain.status !== "watered") throw new Error("expected watering");
+
+    await repository.backfillWateringXp(100);
+    await repository.backfillWateringXp(100);
+
+    const pending = await repository.pendingXp();
+    expect(
+      pending
+        .filter((award) => award.guildId === "1004")
+        .map((award) => award.awardedXp)
+    ).toEqual([90]);
+    expect(
+      pending
+        .filter((award) => award.guildId === "1005")
+        .map((award) => award.awardedXp)
+        .sort((left, right) => left - right)
+    ).toEqual([10, 90]);
   });
 
   it("clears the retired age leaderboard configuration", async () => {
