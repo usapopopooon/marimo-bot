@@ -70,7 +70,7 @@ export function nameModal(): ModalBuilder {
 }
 
 function leaderboardLine(entry: RankingEntry, rank: number): string {
-  return `${rank}. <@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm（生後${entry.ageDays}日）**｜${displayMarimoName(entry.name)}`;
+  return `${rank}. <@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm**｜${displayMarimoName(entry.name)}`;
 }
 
 export function rankingContent(

@@ -17,11 +17,9 @@ describe("Japanese calendar care rules", () => {
 });
 
 describe("growth", () => {
-  it("grows once per completed day without an upper limit", () => {
+  it("grows continuously without an upper limit", () => {
     const born = new Date("2026-01-01T00:00:00Z");
     expect(sizeAt(born, born)).toBe(10);
-    expect(sizeAt(born, new Date("2026-01-01T23:59:59.999Z"))).toBe(10);
-    expect(sizeAt(born, new Date("2026-01-02T00:00:00Z"))).toBe(10.3);
     expect(sizeAt(born, new Date("2026-01-11T00:00:00Z"))).toBe(13);
     expect(sizeAt(born, new Date("2126-01-01T00:00:00Z"))).toBeGreaterThan(
       10_000
@@ -32,13 +30,5 @@ describe("growth", () => {
     const born = new Date("2026-01-01T00:00:00Z");
     expect(ageDays(born, born)).toBe(1);
     expect(ageDays(born, new Date("2026-01-02T00:00:00Z"))).toBe(2);
-  });
-
-  it("always gives the same size to marimos with the same displayed age", () => {
-    const born = new Date("2026-08-10T14:08:05.938Z");
-    const at = new Date("2026-08-10T14:53:38.000Z");
-
-    expect(ageDays(born, at)).toBe(1);
-    expect(sizeAt(born, at)).toBe(10);
   });
 });

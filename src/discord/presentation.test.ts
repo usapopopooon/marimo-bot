@@ -73,7 +73,8 @@ describe("Discord presentation", () => {
 
     expect(ranking).toContain("巨大まりもランキング");
     expect(ranking).not.toContain("ご長寿");
-    expect(ranking).toContain("99.00 mm（生後2日）");
+    expect(ranking).toContain("99.00 mm");
+    expect(ranking).not.toContain("生後");
     expect(ranking.indexOf("young-large")).toBeLessThan(
       ranking.indexOf("old-small")
     );
