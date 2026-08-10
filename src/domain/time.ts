@@ -30,9 +30,11 @@ export function isDead(lastWateredDate: string, now: Date): boolean {
 }
 
 export function sizeAt(bornAt: Date, at: Date): number {
-  const elapsedDays = Math.max(0, at.getTime() - bornAt.getTime()) / DAY_MS;
+  const completedDays = Math.floor(
+    Math.max(0, at.getTime() - bornAt.getTime()) / DAY_MS
+  );
   return (
-    Math.round((INITIAL_SIZE_MM + elapsedDays * DAILY_GROWTH_MM) * 100) / 100
+    Math.round((INITIAL_SIZE_MM + completedDays * DAILY_GROWTH_MM) * 100) / 100
   );
 }
 

@@ -67,7 +67,9 @@ type InteractionDispatcher = {
 };
 
 type RankingUpdater = {
+  client: { guilds: { cache: Map<string, unknown> } };
   updateRankings(guildId: string, now: Date): Promise<void>;
+  refreshRankingPanels(): Promise<void>;
   editRanking(
     channelId: string | null,
     messageId: string | null,
@@ -363,6 +365,23 @@ describe("panel interaction wiring", () => {
       "size-message",
       [living],
       now
+    );
+  });
+
+  it("refreshes every existing ranking panel on startup", async () => {
+    const bot = botWith({}) as unknown as RankingUpdater;
+    bot.client.guilds.cache.set("1001", {});
+    bot.client.guilds.cache.set("1002", {});
+    const updateRankings = vi.fn().mockResolvedValue(undefined);
+    bot.updateRankings = updateRankings;
+
+    await bot.refreshRankingPanels();
+
+    expect(updateRankings).toHaveBeenCalledTimes(2);
+    expect(updateRankings).toHaveBeenNthCalledWith(1, "1001", expect.any(Date));
+    expect(updateRankings).toHaveBeenNthCalledWith(2, "1002", expect.any(Date));
+    expect(updateRankings.mock.calls[0]?.[1]).toEqual(
+      updateRankings.mock.calls[1]?.[1]
     );
   });
 

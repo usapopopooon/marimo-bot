@@ -682,6 +682,17 @@ export class MarimoBot {
     );
   }
 
+  private async refreshRankingPanels(): Promise<void> {
+    const now = new Date();
+    await Promise.all(
+      [...this.client.guilds.cache.keys()].map((guildId) =>
+        this.runBestEffort("Ranking panel refresh", () =>
+          this.updateRankings(guildId, now)
+        )
+      )
+    );
+  }
+
   private async retireAgePanels(): Promise<void> {
     await Promise.all(
       [...this.client.guilds.cache.keys()].map((guildId) =>
@@ -854,6 +865,7 @@ export class MarimoBot {
     await this.retireAgePanels();
     await this.refreshWaterPanels();
     await this.expireNeglected();
+    await this.refreshRankingPanels();
     await this.deliverPendingWateringLogs();
     await this.xpDelivery.deliverPending();
   }
