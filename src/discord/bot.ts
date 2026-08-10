@@ -64,8 +64,20 @@ function configuredChannel(
     : `<#${channelId}>`;
 }
 
+const MARIMO_LOG_FILES = new Set(["marimo-tank.png", "marimo-memorial.png"]);
+
+export function isMarimoImageLog(message: Message, botUserId: string): boolean {
+  return (
+    message.author.id === botUserId &&
+    message.attachments.some((attachment) =>
+      MARIMO_LOG_FILES.has(attachment.name)
+    )
+  );
+}
+
 export class MarimoBot {
   private readonly client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  private readonly wateringLogsInFlight = new Set<string>();
   private sweepTimer: NodeJS.Timeout | undefined;
   private xpTimer: NodeJS.Timeout | undefined;
 
@@ -105,13 +117,14 @@ export class MarimoBot {
         ),
       5 * 60_000
     );
-    this.xpTimer = setInterval(
-      () =>
-        this.runInBackground("Scheduled XP delivery", () =>
-          this.xpDelivery.deliverPending()
-        ),
-      60_000
-    );
+    this.xpTimer = setInterval(() => {
+      this.runInBackground("Scheduled XP delivery", () =>
+        this.xpDelivery.deliverPending()
+      );
+      this.runInBackground("Scheduled watering log delivery", () =>
+        this.deliverPendingWateringLogs()
+      );
+    }, 60_000);
   }
 
   private async registerCommands(applicationId: string): Promise<void> {
@@ -194,7 +207,7 @@ export class MarimoBot {
       await this.runBestEffort("Death log", () => this.postDeathLog(death));
     }
     await this.runBestEffort("Watering log", () =>
-      this.postWateringLog(result.watering)
+      this.deliverWateringLog(result.watering)
     );
     await this.runBestEffort("Ranking update", () =>
       this.updateRankings(guildId, now)
@@ -336,6 +349,10 @@ export class MarimoBot {
       });
       return;
     }
+    if (subcommand === "log-refresh") {
+      await this.repostAllLogs(interaction);
+      return;
+    }
     const config = await this.repository.getConfig(interaction.guildId);
     await interaction.reply({
       content: [
@@ -387,6 +404,86 @@ export class MarimoBot {
       message.id
     );
     await interaction.editReply({ content: "常設パネルを投稿しました。" });
+  }
+
+  private async repostAllLogs(
+    interaction: ChatInputCommandInteraction
+  ): Promise<void> {
+    if (
+      !(interaction.channel instanceof TextChannel) ||
+      interaction.guildId === null
+    ) {
+      await interaction.reply({
+        content: "テキストチャンネルで実行してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const startedAt = new Date();
+    const botUserId = this.client.user?.id;
+    if (botUserId === undefined) throw new Error("Discord client is not ready");
+
+    await this.repository.setLogChannel(
+      interaction.guildId,
+      interaction.channelId
+    );
+    await this.deleteMarimoLogs(interaction.channel, botUserId);
+    const entries = await this.repository.rankings(
+      interaction.guildId,
+      startedAt
+    );
+    const sorted = [...entries].sort(
+      (left, right) => right.sizeMm - left.sizeMm
+    );
+    for (const entry of sorted) {
+      await this.postCurrentMarimoLog(interaction.channel, entry);
+    }
+    await this.repository.markGuildWateringLogsDeliveredThrough(
+      interaction.guildId,
+      startedAt
+    );
+    await interaction.deleteReply();
+  }
+
+  private async deleteMarimoLogs(
+    channel: TextChannel,
+    botUserId: string
+  ): Promise<void> {
+    let before: string | undefined;
+    for (;;) {
+      const messages = await channel.messages.fetch({
+        limit: 100,
+        ...(before === undefined ? {} : { before })
+      });
+      if (messages.size === 0) break;
+      const oldest = messages.last();
+      for (const message of messages.values()) {
+        if (!isMarimoImageLog(message, botUserId)) continue;
+        await message.delete();
+      }
+      if (messages.size < 100 || oldest === undefined) break;
+      before = oldest.id;
+    }
+  }
+
+  private async postCurrentMarimoLog(
+    channel: TextChannel,
+    entry: RankingEntry
+  ): Promise<void> {
+    const image = await renderTankImage({
+      seed: `${entry.guildId}:${entry.userId}:${entry.generation}`,
+      sizeMm: entry.sizeMm,
+      ageDays: entry.ageDays
+    });
+    await channel.send({
+      content: [
+        `🟢 <@${entry.userId}> の **${entry.name}**`,
+        `第${entry.generation}世代｜生後 **${entry.ageDays}日**｜**${entry.sizeMm.toFixed(2)} mm**`
+      ].join("\n"),
+      files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
+      allowedMentions: { parse: [] }
+    });
   }
 
   private async deactivateOldPanel(
@@ -528,7 +625,9 @@ export class MarimoBot {
     const config = await this.repository.getConfig(watering.marimo.guildId);
     if (config.logChannelId === null) return;
     const channel = await this.client.channels.fetch(config.logChannelId);
-    if (!(channel instanceof TextChannel)) return;
+    if (!(channel instanceof TextChannel)) {
+      throw new Error("Configured watering log channel is unavailable");
+    }
     const image = await renderTankImage({
       seed: `${watering.marimo.guildId}:${watering.marimo.userId}:${watering.marimo.generation}`,
       sizeMm: watering.sizeMm,
@@ -542,6 +641,30 @@ export class MarimoBot {
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
       allowedMentions: { parse: [] }
     });
+  }
+
+  private async deliverWateringLog(watering: Watering): Promise<void> {
+    if (this.wateringLogsInFlight.has(watering.eventId)) return;
+    this.wateringLogsInFlight.add(watering.eventId);
+    try {
+      await this.postWateringLog(watering);
+      await this.repository.markWateringLogDelivered(watering.eventId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.repository.markWateringLogFailed(watering.eventId, message);
+      throw error;
+    } finally {
+      this.wateringLogsInFlight.delete(watering.eventId);
+    }
+  }
+
+  private async deliverPendingWateringLogs(): Promise<void> {
+    const waterings = await this.repository.pendingWateringLogs();
+    for (const watering of waterings) {
+      await this.runBestEffort("Watering log retry", () =>
+        this.deliverWateringLog(watering)
+      );
+    }
   }
 
   private async postDeathLog(death: DeadMarimo): Promise<void> {
@@ -599,6 +722,7 @@ export class MarimoBot {
     await this.retireAgePanels();
     await this.refreshWaterPanels();
     await this.expireNeglected();
+    await this.deliverPendingWateringLogs();
     await this.xpDelivery.deliverPending();
   }
 

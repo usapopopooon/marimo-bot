@@ -21,5 +21,6 @@ describe("Discord commands", () => {
       '"name":"log","description":"実行したチャンネルを画像ログの投稿先に設定"'
     );
     expect(commandJson).not.toContain('"name":"channel"');
+    expect(commandJson).toContain('"name":"log-refresh"');
   });
 });

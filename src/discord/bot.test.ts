@@ -1,11 +1,17 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
-import { TextChannel, type Interaction, type ModalBuilder } from "discord.js";
+import {
+  TextChannel,
+  type ChatInputCommandInteraction,
+  type Interaction,
+  type Message,
+  type ModalBuilder
+} from "discord.js";
 import type { Config } from "../config/env.js";
 import type { MarimoRepository } from "../db/repository.js";
-import type { GuildConfig, RankingEntry } from "../domain/types.js";
+import type { GuildConfig, RankingEntry, Watering } from "../domain/types.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
-import { MarimoBot } from "./bot.js";
+import { isMarimoImageLog, MarimoBot } from "./bot.js";
 import { NAME_BUTTON_ID, NAME_MODAL_ID } from "./presentation.js";
 
 const config: Config = {
@@ -43,6 +49,16 @@ const living: RankingEntry = {
   ageDays: 1
 };
 
+const watering: Watering = {
+  eventId: "00000000-0000-4000-8000-000000000001",
+  marimo: living,
+  wateredAt: new Date("2026-08-10T00:00:00Z"),
+  wateredDate: "2026-08-10",
+  sizeMm: 10,
+  ageDays: 1,
+  awardedXp: 10
+};
+
 type InteractionDispatcher = {
   handleInteraction(interaction: Interaction): Promise<void>;
 };
@@ -54,6 +70,22 @@ type RankingUpdater = {
     messageId: string | null,
     entries: RankingEntry[],
     now: Date
+  ): Promise<void>;
+};
+
+type WateringLogDeliverer = {
+  deliverWateringLog(watering: Watering): Promise<void>;
+  deliverPendingWateringLogs(): Promise<void>;
+  postWateringLog(watering: Watering): Promise<void>;
+};
+
+type LogRefresher = {
+  client: { user: { id: string } | null };
+  repostAllLogs(interaction: ChatInputCommandInteraction): Promise<void>;
+  deleteMarimoLogs(channel: TextChannel, botUserId: string): Promise<void>;
+  postCurrentMarimoLog(
+    channel: TextChannel,
+    entry: RankingEntry
   ): Promise<void>;
 };
 
@@ -72,7 +104,30 @@ async function dispatch(bot: MarimoBot, interaction: object): Promise<void> {
   );
 }
 
+function logMessage(authorId: string, attachmentName: string): Message {
+  return {
+    author: { id: authorId },
+    attachments: {
+      some: (predicate: (attachment: { name: string }) => boolean) =>
+        predicate({ name: attachmentName })
+    }
+  } as unknown as Message;
+}
+
 describe("panel interaction wiring", () => {
+  it("recognizes only this bot's marimo image logs for deletion", () => {
+    expect(isMarimoImageLog(logMessage("bot", "marimo-tank.png"), "bot")).toBe(
+      true
+    );
+    expect(
+      isMarimoImageLog(logMessage("bot", "marimo-memorial.png"), "bot")
+    ).toBe(true);
+    expect(isMarimoImageLog(logMessage("user", "marimo-tank.png"), "bot")).toBe(
+      false
+    );
+    expect(isMarimoImageLog(logMessage("bot", "other.png"), "bot")).toBe(false);
+  });
+
   it("opens the naming modal from the panel button", async () => {
     const showModal = vi
       .fn<(modal: ModalBuilder) => Promise<void>>()
@@ -139,6 +194,69 @@ describe("panel interaction wiring", () => {
       content: "画像ログの投稿先を <#3001> に設定しました。",
       ephemeral: true
     });
+  });
+
+  it("retries an uncertain watering log post from the pending queue", async () => {
+    const markWateringLogDelivered = vi.fn().mockResolvedValue(undefined);
+    const markWateringLogFailed = vi.fn().mockResolvedValue(undefined);
+    const repository: Partial<MarimoRepository> = {
+      pendingWateringLogs: vi.fn().mockResolvedValue([watering]),
+      markWateringLogDelivered,
+      markWateringLogFailed
+    };
+    const bot = botWith(repository) as unknown as WateringLogDeliverer;
+    const postWateringLog = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unknown Discord result"))
+      .mockResolvedValueOnce(undefined);
+    bot.postWateringLog = postWateringLog;
+
+    await expect(bot.deliverWateringLog(watering)).rejects.toThrow(
+      "unknown Discord result"
+    );
+    await bot.deliverPendingWateringLogs();
+
+    expect(postWateringLog).toHaveBeenCalledTimes(2);
+    expect(markWateringLogFailed).toHaveBeenCalledWith(
+      watering.eventId,
+      "unknown Discord result"
+    );
+    expect(markWateringLogDelivered).toHaveBeenCalledWith(watering.eventId);
+  });
+
+  it("refreshes all current logs without a completion announcement", async () => {
+    const repository: Partial<MarimoRepository> = {
+      setLogChannel: vi.fn().mockResolvedValue(undefined),
+      rankings: vi.fn().mockResolvedValue([living]),
+      markGuildWateringLogsDeliveredThrough: vi
+        .fn()
+        .mockResolvedValue(undefined)
+    };
+    const bot = botWith(repository) as unknown as LogRefresher;
+    Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
+    const deleteMarimoLogs = vi.fn().mockResolvedValue(undefined);
+    const postCurrentMarimoLog = vi.fn().mockResolvedValue(undefined);
+    bot.deleteMarimoLogs = deleteMarimoLogs;
+    bot.postCurrentMarimoLog = postCurrentMarimoLog;
+    const channel = Object.create(TextChannel.prototype) as TextChannel;
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const deleteReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await bot.repostAllLogs({
+      guildId: "1001",
+      channelId: "3001",
+      channel,
+      deferReply,
+      deleteReply,
+      editReply
+    } as unknown as ChatInputCommandInteraction);
+
+    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(deleteMarimoLogs).toHaveBeenCalledWith(channel, "bot");
+    expect(postCurrentMarimoLog).toHaveBeenCalledWith(channel, living);
+    expect(deleteReply).toHaveBeenCalledOnce();
+    expect(editReply).not.toHaveBeenCalled();
   });
 
   it("passes modal guild, user, and trimmed name to rename", async () => {

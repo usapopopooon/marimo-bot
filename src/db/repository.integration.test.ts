@@ -63,6 +63,43 @@ suite("MarimoRepository integration", () => {
     );
     expect(rankings).toHaveLength(1);
     expect(rankings[0]?.generation).toBe(2);
+
+    const pendingLogs = (await repository.pendingWateringLogs()).filter(
+      (watering) => watering.marimo.guildId === "1001"
+    );
+    expect(pendingLogs).toHaveLength(2);
+    const firstLog = pendingLogs[0];
+    if (firstLog === undefined) throw new Error("expected watering log");
+    await repository.markWateringLogFailed(firstLog.eventId, "send failed");
+    expect(
+      (await repository.pendingWateringLogs()).find(
+        (watering) => watering.eventId === firstLog.eventId
+      )?.deliveryAttempts
+    ).toBe(1);
+    await repository.markWateringLogDelivered(firstLog.eventId);
+    expect(
+      (await repository.pendingWateringLogs()).some(
+        (watering) => watering.eventId === firstLog.eventId
+      )
+    ).toBe(false);
+    await repository.markGuildWateringLogsDeliveredThrough(
+      "1001",
+      new Date("2026-08-11T00:00:00Z")
+    );
+    expect(
+      (await repository.pendingWateringLogs()).filter(
+        (watering) => watering.marimo.guildId === "1001"
+      )
+    ).toHaveLength(1);
+    await repository.markGuildWateringLogsDeliveredThrough(
+      "1001",
+      new Date("2026-08-13T00:00:00Z")
+    );
+    expect(
+      (await repository.pendingWateringLogs()).filter(
+        (watering) => watering.marimo.guildId === "1001"
+      )
+    ).toHaveLength(0);
   });
 
   it("uses the exact Japanese midnight death boundary", async () => {

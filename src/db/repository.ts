@@ -6,6 +6,7 @@ import type {
   GuildConfig,
   LivingMarimo,
   PanelKind,
+  PendingWateringLog,
   RankingEntry,
   WaterResult,
   XpAward
@@ -32,6 +33,15 @@ type ConfigRow = QueryResultRow & {
   age_panel_message_id: string | null;
   size_panel_channel_id: string | null;
   size_panel_message_id: string | null;
+};
+
+type WateringLogRow = MarimoRow & {
+  event_id: string;
+  watered_at: Date;
+  watered_date: string | Date;
+  size_mm: string | number;
+  awarded_xp: number;
+  log_delivery_attempts: number;
 };
 
 const panelColumns: Record<PanelKind, { channel: string; message: string }> = {
@@ -163,8 +173,8 @@ export class MarimoRepository {
       await client.query(
         `INSERT INTO marimo_waterings (
            event_id, marimo_id, guild_id, user_id, channel_id,
-           watered_date, watered_at, size_mm, awarded_xp
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+           watered_date, watered_at, size_mm, awarded_xp, log_delivery_status
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')`,
         [
           eventId,
           active.id,
@@ -409,6 +419,71 @@ export class MarimoRepository {
            updated_at = NOW()
        WHERE guild_id = $1`,
       [guildId]
+    );
+  }
+
+  public async pendingWateringLogs(limit = 25): Promise<PendingWateringLog[]> {
+    const result = await this.pool.query<WateringLogRow>(
+      `SELECT w.event_id, w.watered_at, w.watered_date, w.size_mm,
+              w.awarded_xp, w.log_delivery_attempts,
+              m.id, m.guild_id, m.user_id, m.generation,
+              m.owner_display_name, m.name, m.born_at,
+              m.last_watered_at, m.last_watered_date
+       FROM marimo_waterings w
+       JOIN marimos m ON m.id = w.marimo_id
+       WHERE w.log_delivery_status = 'pending'
+       ORDER BY w.log_delivery_attempts ASC, w.created_at ASC
+       LIMIT $1`,
+      [limit]
+    );
+    return result.rows.map((row) => ({
+      eventId: row.event_id,
+      marimo: livingFromRow(row),
+      wateredAt: new Date(row.watered_at),
+      wateredDate: dateString(row.watered_date),
+      sizeMm: Number(row.size_mm),
+      ageDays: ageDays(new Date(row.born_at), new Date(row.watered_at)),
+      awardedXp: row.awarded_xp,
+      deliveryAttempts: row.log_delivery_attempts
+    }));
+  }
+
+  public async markWateringLogDelivered(eventId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_waterings
+       SET log_delivery_status = 'delivered',
+           log_delivery_attempts = log_delivery_attempts + 1,
+           log_delivered_at = NOW(), log_last_error = NULL
+       WHERE event_id = $1`,
+      [eventId]
+    );
+  }
+
+  public async markWateringLogFailed(
+    eventId: string,
+    error: string
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_waterings
+       SET log_delivery_attempts = log_delivery_attempts + 1,
+           log_last_error = LEFT($2, 1000)
+       WHERE event_id = $1`,
+      [eventId, error]
+    );
+  }
+
+  public async markGuildWateringLogsDeliveredThrough(
+    guildId: string,
+    through: Date
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_waterings
+       SET log_delivery_status = 'delivered',
+           log_delivery_attempts = log_delivery_attempts + 1,
+           log_delivered_at = NOW(), log_last_error = NULL
+       WHERE guild_id = $1 AND watered_at <= $2
+         AND log_delivery_status = 'pending'`,
+      [guildId, through]
     );
   }
 

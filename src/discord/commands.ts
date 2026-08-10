@@ -29,6 +29,11 @@ export const commands = [
       subcommand.setName("log-disable").setDescription("画像ログを停止")
     )
     .addSubcommand((subcommand) =>
+      subcommand
+        .setName("log-refresh")
+        .setDescription("まりも画像ログを現在の状態に整理")
+    )
+    .addSubcommand((subcommand) =>
       subcommand.setName("status").setDescription("現在の設定を確認")
     )
 ].map((command) => command.toJSON());

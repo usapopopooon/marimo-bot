@@ -25,6 +25,10 @@ export type Watering = {
   awardedXp: number;
 };
 
+export type PendingWateringLog = Watering & {
+  deliveryAttempts: number;
+};
+
 export type WaterResult =
   | {
       status: "already-watered";
