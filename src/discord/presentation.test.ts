@@ -92,11 +92,10 @@ describe("Discord presentation", () => {
       new Date("2026-08-10T00:00:00Z")
     );
 
-    expect(ranking).toContain("**1位**｜@same-a");
-    expect(ranking).toContain("**1位**｜@same-b");
-    expect(ranking).toContain("**3位**｜@smaller");
+    expect(ranking).toContain("**1位**｜<@same-a>");
+    expect(ranking).toContain("**1位**｜<@same-b>");
+    expect(ranking).toContain("**3位**｜<@smaller>");
     expect(ranking).not.toMatch(/^\d+\. /m);
-    expect(ranking).not.toContain("<@");
     expect(ranking).not.toContain("https://");
   });
 
@@ -119,15 +118,13 @@ describe("Discord presentation", () => {
     expect(birth).not.toContain("水を替えました");
     expect(care).toContain("水を替えました");
     expect(care).not.toContain("が生まれました");
-    expect(birth).toContain("@new-owner");
-    expect(care).toContain("@new-owner");
-    expect(birth).not.toContain("<@");
-    expect(care).not.toContain("<@");
+    expect(birth).toContain("<@new-owner>");
+    expect(care).toContain("<@new-owner>");
     expect(birth).not.toContain("https://");
     expect(care).not.toContain("https://");
   });
 
-  it("keeps plain at-sign labels without mentions or links in every image log", () => {
+  it("keeps Discord user mention syntax without URL links in every image log", () => {
     const living = entry("owner", 1, 10);
     const dead = {
       ...living,
@@ -138,10 +135,8 @@ describe("Discord presentation", () => {
     const current = currentMarimoLogContent(living);
     const memorial = deathLogContent(dead);
 
-    expect(current).toContain("@owner");
-    expect(memorial).toContain("@owner");
-    expect(current).not.toContain("<@");
-    expect(memorial).not.toContain("<@");
+    expect(current).toContain("<@owner>");
+    expect(memorial).toContain("<@owner>");
     expect(current).not.toContain("https://");
     expect(memorial).not.toContain("https://");
   });
