@@ -6,25 +6,6 @@ import {
 
 export const commands = [
   new SlashCommandBuilder()
-    .setName("marimo")
-    .setDescription("自分のまりもちゃん")
-    .addSubcommand((subcommand) =>
-      subcommand.setName("status").setDescription("現在のまりもを見る")
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("name")
-        .setDescription("まりもに名前を付ける")
-        .addStringOption((option) =>
-          option
-            .setName("name")
-            .setDescription("新しい名前")
-            .setMinLength(1)
-            .setMaxLength(32)
-            .setRequired(true)
-        )
-    ),
-  new SlashCommandBuilder()
     .setName("marimo-admin")
     .setDescription("まりもBotの管理")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)

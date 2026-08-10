@@ -11,7 +11,8 @@ import {
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Interaction,
-  type Message
+  type Message,
+  type ModalSubmitInteraction
 } from "discord.js";
 import type { Logger } from "pino";
 import type { Config } from "../config/env.js";
@@ -27,6 +28,10 @@ import { renderTankImage } from "../rendering/tank.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
 import {
+  nameModal,
+  NAME_BUTTON_ID,
+  NAME_INPUT_ID,
+  NAME_MODAL_ID,
   rankingContent,
   STATUS_BUTTON_ID,
   statusContent,
@@ -126,11 +131,16 @@ export class MarimoBot {
           await this.handleWater(interaction);
         if (interaction.customId === STATUS_BUTTON_ID)
           await this.handleButtonStatus(interaction);
+        if (interaction.customId === NAME_BUTTON_ID)
+          await interaction.showModal(nameModal());
+        return;
+      }
+      if (interaction.isModalSubmit()) {
+        if (interaction.customId === NAME_MODAL_ID)
+          await this.handleNameModal(interaction);
         return;
       }
       if (!interaction.isChatInputCommand()) return;
-      if (interaction.commandName === "marimo")
-        await this.handleUserCommand(interaction);
       if (interaction.commandName === "marimo-admin") {
         await this.handleAdminCommand(interaction);
       }
@@ -233,8 +243,8 @@ export class MarimoBot {
     });
   }
 
-  private async handleUserCommand(
-    interaction: ChatInputCommandInteraction
+  private async handleNameModal(
+    interaction: ModalSubmitInteraction
   ): Promise<void> {
     if (interaction.guildId === null) {
       await interaction.reply({
@@ -243,28 +253,38 @@ export class MarimoBot {
       });
       return;
     }
-    const subcommand = interaction.options.getSubcommand();
-    if (subcommand === "status") {
-      const entry = await this.repository.getLiving(
-        interaction.guildId,
-        interaction.user.id,
-        new Date()
-      );
+    const guildId = interaction.guildId;
+    const now = new Date();
+    const entry = await this.repository.getLiving(
+      guildId,
+      interaction.user.id,
+      now
+    );
+    if (entry === null) {
       await interaction.reply({
-        content:
-          entry === null
-            ? "生きているまりもはいません。水替えパネルから育て始めましょう。"
-            : statusContent(entry),
+        content: "生きているまりもがいません。先に水を替えてください。",
         ephemeral: true
       });
       return;
     }
-    const name = interaction.options.getString("name", true).trim();
+    const name = interaction.fields.getTextInputValue(NAME_INPUT_ID).trim();
+    if (name.length === 0) {
+      await interaction.reply({
+        content: "名前を1文字以上入力してください。",
+        ephemeral: true
+      });
+      return;
+    }
     const renamed = await this.repository.rename(
-      interaction.guildId,
+      guildId,
       interaction.user.id,
       name
     );
+    if (renamed) {
+      await this.runBestEffort("Ranking update after rename", () =>
+        this.updateRankings(guildId, now)
+      );
+    }
     await interaction.reply({
       content: renamed
         ? `まりもの名前を **${name}** に変更しました。`
@@ -410,6 +430,30 @@ export class MarimoBot {
     ]);
   }
 
+  private async refreshWaterPanels(): Promise<void> {
+    await Promise.all(
+      [...this.client.guilds.cache.keys()].map((guildId) =>
+        this.runBestEffort("Water panel refresh", async () => {
+          const config = await this.repository.getConfig(guildId);
+          if (
+            config.waterPanelChannelId === null ||
+            config.waterPanelMessageId === null
+          )
+            return;
+          const message = await this.fetchMessage(
+            config.waterPanelChannelId,
+            config.waterPanelMessageId
+          );
+          if (message === null) return;
+          await message.edit({
+            ...waterPanel(this.config.WATER_XP),
+            allowedMentions: { parse: [] }
+          });
+        })
+      )
+    );
+  }
+
   private async editRanking(
     channelId: string | null,
     messageId: string | null,
@@ -522,6 +566,7 @@ export class MarimoBot {
   }
 
   private async runMaintenance(): Promise<void> {
+    await this.refreshWaterPanels();
     await this.expireNeglected();
     await this.xpDelivery.deliverPending();
   }

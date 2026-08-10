@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { RankingEntry } from "../domain/types.js";
-import { rankingContent, waterPanel } from "./presentation.js";
+import {
+  nameModal,
+  NAME_BUTTON_ID,
+  NAME_INPUT_ID,
+  NAME_MODAL_ID,
+  rankingContent,
+  waterPanel
+} from "./presentation.js";
 
 function entry(userId: string, age: number, size: number): RankingEntry {
   return {
@@ -24,7 +31,27 @@ describe("Discord presentation", () => {
     expect(panel.content).toContain("1日1回");
     expect(panel.content).toContain("10 XP");
     expect(panel.content).toContain("枯れてしまい");
-    expect(panel.components[0]?.components).toHaveLength(2);
+    expect(panel.components[0]?.components).toHaveLength(3);
+    expect(
+      panel.components[0]?.components.map((component) => component.toJSON())
+    ).toContainEqual(expect.objectContaining({ custom_id: NAME_BUTTON_ID }));
+  });
+
+  it("opens a constrained name modal from the panel", () => {
+    const modal = nameModal().toJSON();
+    expect(modal).toMatchObject({
+      custom_id: NAME_MODAL_ID,
+      components: [
+        {
+          component: {
+            custom_id: NAME_INPUT_ID,
+            min_length: 1,
+            max_length: 32,
+            required: true
+          }
+        }
+      ]
+    });
   });
 
   it("maps age and size to their correct ranking consumers", () => {

@@ -1,8 +1,19 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  LabelBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} from "discord.js";
 import type { RankingEntry } from "../domain/types.js";
 
 export const WATER_BUTTON_ID = "marimo:water";
 export const STATUS_BUTTON_ID = "marimo:status";
+export const NAME_BUTTON_ID = "marimo:name";
+export const NAME_MODAL_ID = "marimo:name-modal";
+export const NAME_INPUT_ID = "marimo:name-input";
 
 export function waterPanel(waterXp: number): {
   content: string;
@@ -17,6 +28,10 @@ export function waterPanel(waterXp: number): {
     new ButtonBuilder()
       .setCustomId(STATUS_BUTTON_ID)
       .setLabel("自分のまりも")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(NAME_BUTTON_ID)
+      .setLabel("名前をつける")
       .setStyle(ButtonStyle.Secondary)
   );
   return {
@@ -29,6 +44,23 @@ export function waterPanel(waterXp: number): {
     ].join("\n"),
     components: [row]
   };
+}
+
+export function nameModal(): ModalBuilder {
+  const input = new TextInputBuilder()
+    .setCustomId(NAME_INPUT_ID)
+    .setPlaceholder("新しい名前を入力")
+    .setMinLength(1)
+    .setMaxLength(32)
+    .setRequired(true)
+    .setStyle(TextInputStyle.Short);
+  const label = new LabelBuilder()
+    .setLabel("まりもの名前")
+    .setTextInputComponent(input);
+  return new ModalBuilder()
+    .setCustomId(NAME_MODAL_ID)
+    .setTitle("まりもに名前をつける")
+    .addLabelComponents(label);
 }
 
 function leaderboardLine(
