@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "compose:check": "node scripts/check-compose-env-scope.mjs",
     "dev": "tsx watch src/app/main.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
