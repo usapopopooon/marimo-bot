@@ -528,6 +528,7 @@ describe("panel interaction wiring", () => {
     expect(edit).toHaveBeenCalledOnce();
     expect(edit.mock.calls[0]?.[0]).toMatchObject({
       content: "",
+      flags: [],
       allowedMentions: { parse: [] }
     });
     const payload = edit.mock.calls[0]?.[0] as {
@@ -554,6 +555,7 @@ describe("panel interaction wiring", () => {
     expect(edit.mock.calls[0]?.[0]).toMatchObject({
       content: "",
       components: [],
+      flags: [],
       allowedMentions: { parse: [] }
     });
     const payload = edit.mock.calls[0]?.[0] as {

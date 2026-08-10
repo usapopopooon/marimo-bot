@@ -30,6 +30,7 @@ export function waterPanel(waterXp: number): {
   content: string;
   embeds: EmbedBuilder[];
   components: ActionRowBuilder<ButtonBuilder>[];
+  flags: [];
 } {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -61,7 +62,8 @@ export function waterPanel(waterXp: number): {
         )
         .setFooter({ text: "日付は日本時間の0:00に切り替わります" })
     ],
-    components: [row]
+    components: [row],
+    flags: []
   };
 }
 
@@ -89,7 +91,7 @@ function leaderboardLine(entry: RankingEntry, rank: number): string {
 export function rankingPanel(
   entries: RankingEntry[],
   updatedAt: Date
-): { content: string; embeds: EmbedBuilder[]; components: [] } {
+): { content: string; embeds: EmbedBuilder[]; components: []; flags: [] } {
   const sorted = [...entries]
     .sort((left, right) => right.sizeMm - left.sizeMm)
     .slice(0, 10);
@@ -114,7 +116,8 @@ export function rankingPanel(
         .setTitle("📏 巨大まりもランキング")
         .setDescription(description)
     ],
-    components: []
+    components: [],
+    flags: []
   };
 }
 

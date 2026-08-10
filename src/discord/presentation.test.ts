@@ -33,6 +33,7 @@ describe("Discord presentation", () => {
     const panel = waterPanel(100);
     const embed = panel.embeds[0]?.toJSON();
     expect(panel.content).toBe("");
+    expect(panel.flags).toEqual([]);
     expect(panel.embeds).toHaveLength(1);
     expect(embed?.title).toBe("🟢 まりもちゃん");
     expect(embed?.description).toContain("自分のまりもが生まれ、**100 XP**");
@@ -83,6 +84,7 @@ describe("Discord presentation", () => {
 
     expect(panel.content).toBe("");
     expect(panel.components).toEqual([]);
+    expect(panel.flags).toEqual([]);
     expect(ranking).toContain("巨大まりもランキング");
     expect(ranking).not.toContain("ご長寿");
     expect(ranking).toContain("99.00 mm");
