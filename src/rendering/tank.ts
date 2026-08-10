@@ -35,8 +35,8 @@ export async function renderTankImage(input: TankImageInput): Promise<Buffer> {
         </filter>
       </defs>
       <rect width="1200" height="675" fill="${water}"/>
-      <text x="58" y="66" font-family="DejaVu Sans, sans-serif" font-size="30" font-weight="700" fill="#102a35">大きさ: ${input.sizeMm.toFixed(2)}mm</text>
-      <text x="1142" y="66" text-anchor="end" font-family="DejaVu Sans, sans-serif" font-size="30" font-weight="700" fill="#102a35">${input.ageDays}日目</text>
+      <text x="58" y="66" font-family="Noto Sans CJK JP, sans-serif" font-size="30" font-weight="700" fill="#102a35">大きさ: ${input.sizeMm.toFixed(2)}mm</text>
+      <text x="1142" y="66" text-anchor="end" font-family="Noto Sans CJK JP, sans-serif" font-size="30" font-weight="700" fill="#102a35">${input.ageDays}日目</text>
       <circle cx="${centerX}" cy="${centerY}" r="${radius}" fill="url(#moss)" filter="url(#softMoss)"/>
     </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
