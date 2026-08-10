@@ -31,7 +31,7 @@ export const commands = [
     .addSubcommand((subcommand) =>
       subcommand
         .setName("log-refresh")
-        .setDescription("まりも画像ログを現在の状態に整理")
+        .setDescription("まりも画像ログを全履歴から時系列で作り直す")
     )
     .addSubcommand((subcommand) =>
       subcommand.setName("status").setDescription("現在の設定を確認")

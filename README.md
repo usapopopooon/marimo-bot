@@ -21,7 +21,7 @@
 - `/marimo-admin panel type:水替え` — 実行チャンネルへ水替えパネルを投稿
 - `/marimo-admin panel type:大きさランキング` — 常設ランキングを投稿
 - `/marimo-admin log` — 実行チャンネルを画像ログの投稿先に設定
-- `/marimo-admin log-refresh` — 実行チャンネルの過去ログを消し、生存中の全員分を並べ直す
+- `/marimo-admin log-refresh` — 実行チャンネルの旧画像ログを、DBに残る全水替え・死亡履歴から時系列で作り直す
 - `/marimo-admin log-disable` — 画像ログを停止
 - `/marimo-admin status` — 現在の設定を確認
 

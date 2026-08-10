@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RankingEntry } from "../domain/types.js";
 import {
-  currentMarimoLogContent,
   deathLogContent,
   nameModal,
   NAME_BUTTON_ID,
@@ -124,7 +123,7 @@ describe("Discord presentation", () => {
     expect(care).not.toContain("https://");
   });
 
-  it("keeps Discord user mention syntax without URL links in every image log", () => {
+  it("keeps Discord user mention syntax without URL links in death logs", () => {
     const living = entry("owner", 1, 10);
     const dead = {
       ...living,
@@ -132,12 +131,9 @@ describe("Discord presentation", () => {
       finalSizeMm: 10.3
     };
 
-    const current = currentMarimoLogContent(living);
     const memorial = deathLogContent(dead);
 
-    expect(current).toContain("<@owner>");
     expect(memorial).toContain("<@owner>");
-    expect(current).not.toContain("https://");
     expect(memorial).not.toContain("https://");
   });
 

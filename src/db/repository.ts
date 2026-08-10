@@ -8,6 +8,7 @@ import type {
   PanelKind,
   PendingWateringLog,
   RankingEntry,
+  Watering,
   WaterResult,
   XpAward
 } from "../domain/types.js";
@@ -43,6 +44,11 @@ type WateringLogRow = MarimoRow & {
   awarded_xp: number;
   log_delivery_attempts: number;
   is_birth: boolean;
+};
+
+type DeadMarimoRow = MarimoRow & {
+  died_at: Date;
+  final_size_mm: string | number;
 };
 
 const panelColumns: Record<PanelKind, { channel: string; message: string }> = {
@@ -87,6 +93,19 @@ function configFromRow(row: ConfigRow): GuildConfig {
     agePanelMessageId: row.age_panel_message_id,
     sizePanelChannelId: row.size_panel_channel_id,
     sizePanelMessageId: row.size_panel_message_id
+  };
+}
+
+function wateringFromRow(row: WateringLogRow): Watering {
+  return {
+    eventId: row.event_id,
+    marimo: livingFromRow(row),
+    wateredAt: new Date(row.watered_at),
+    wateredDate: dateString(row.watered_date),
+    sizeMm: Number(row.size_mm),
+    ageDays: ageDays(new Date(row.born_at), new Date(row.watered_at)),
+    awardedXp: row.awarded_xp,
+    isBirth: row.is_birth
   };
 }
 
@@ -443,15 +462,44 @@ export class MarimoRepository {
       [limit]
     );
     return result.rows.map((row) => ({
-      eventId: row.event_id,
-      marimo: livingFromRow(row),
-      wateredAt: new Date(row.watered_at),
-      wateredDate: dateString(row.watered_date),
-      sizeMm: Number(row.size_mm),
-      ageDays: ageDays(new Date(row.born_at), new Date(row.watered_at)),
-      awardedXp: row.awarded_xp,
-      isBirth: row.is_birth,
+      ...wateringFromRow(row),
       deliveryAttempts: row.log_delivery_attempts
+    }));
+  }
+
+  public async wateringLogHistory(
+    guildId: string,
+    through: Date
+  ): Promise<Watering[]> {
+    const result = await this.pool.query<WateringLogRow>(
+      `SELECT w.event_id, w.watered_at, w.watered_date, w.size_mm, w.is_birth,
+              w.awarded_xp, w.log_delivery_attempts,
+              m.id, m.guild_id, m.user_id, m.generation,
+              m.owner_display_name, m.name, m.born_at,
+              m.last_watered_at, m.last_watered_date
+       FROM marimo_waterings w
+       JOIN marimos m ON m.id = w.marimo_id
+       WHERE w.guild_id = $1 AND w.watered_at <= $2
+       ORDER BY w.watered_at ASC, w.created_at ASC, w.event_id ASC`,
+      [guildId, through]
+    );
+    return result.rows.map(wateringFromRow);
+  }
+
+  public async deathLogHistory(
+    guildId: string,
+    through: Date
+  ): Promise<DeadMarimo[]> {
+    const result = await this.pool.query<DeadMarimoRow>(
+      `SELECT * FROM marimos
+       WHERE guild_id = $1 AND died_at IS NOT NULL AND died_at <= $2
+       ORDER BY died_at ASC, id ASC`,
+      [guildId, through]
+    );
+    return result.rows.map((row) => ({
+      ...livingFromRow(row),
+      diedAt: new Date(row.died_at),
+      finalSizeMm: Number(row.final_size_mm)
     }));
   }
 

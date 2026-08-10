@@ -87,6 +87,27 @@ suite("MarimoRepository integration", () => {
       false,
       true
     ]);
+    const fullWateringHistory = await repository.wateringLogHistory(
+      "1001",
+      new Date("2026-08-13T00:00:00Z")
+    );
+    expect(fullWateringHistory.map((event) => event.eventId)).toEqual([
+      first.watering.eventId,
+      continued.watering.eventId,
+      nextGeneration.watering.eventId
+    ]);
+    expect(
+      await repository.wateringLogHistory(
+        "1001",
+        new Date("2026-08-11T04:00:00Z")
+      )
+    ).toHaveLength(2);
+    const deathHistory = await repository.deathLogHistory(
+      "1001",
+      new Date("2026-08-13T00:00:00Z")
+    );
+    expect(deathHistory).toHaveLength(1);
+    expect(deathHistory[0]?.generation).toBe(1);
     const firstLog = pendingLogs[0];
     if (firstLog === undefined) throw new Error("expected watering log");
     await repository.markWateringLogFailed(firstLog.eventId, "send failed");

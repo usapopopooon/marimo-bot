@@ -28,7 +28,6 @@ import { renderTankImage } from "../rendering/tank.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
 import {
-  currentMarimoLogContent,
   deathLogContent,
   displayMarimoName,
   nameModal,
@@ -543,12 +542,13 @@ export class MarimoBot {
       });
       return;
     }
+    const channel = interaction.channel;
     await interaction.deferReply({ ephemeral: true });
     const startedAt = new Date();
     const botUserId = this.client.user?.id;
     if (botUserId === undefined) throw new Error("Discord client is not ready");
     const missing = missingLogPermissions(
-      interaction.channel.permissionsFor(botUserId),
+      channel.permissionsFor(botUserId),
       true
     );
     if (missing.length > 0) {
@@ -558,16 +558,23 @@ export class MarimoBot {
       return;
     }
 
-    const oldLogs = await this.findMarimoLogs(interaction.channel, botUserId);
-    const entries = await this.repository.rankings(
-      interaction.guildId,
-      startedAt
-    );
-    const sorted = [...entries].sort(
-      (left, right) => right.sizeMm - left.sizeMm
-    );
-    for (const entry of sorted) {
-      await this.postCurrentMarimoLog(interaction.channel, entry);
+    const oldLogs = await this.findMarimoLogs(channel, botUserId);
+    const [waterings, deaths] = await Promise.all([
+      this.repository.wateringLogHistory(interaction.guildId, startedAt),
+      this.repository.deathLogHistory(interaction.guildId, startedAt)
+    ]);
+    const history = [
+      ...waterings.map((watering) => ({
+        at: watering.wateredAt,
+        post: () => this.postWateringLogToChannel(channel, watering)
+      })),
+      ...deaths.map((death) => ({
+        at: death.diedAt,
+        post: () => this.postDeathLogToChannel(channel, death)
+      }))
+    ].sort((left, right) => left.at.getTime() - right.at.getTime());
+    for (const event of history) {
+      await event.post();
     }
     for (const oldLog of oldLogs) await oldLog.delete();
     await this.repository.setLogChannel(
@@ -602,22 +609,6 @@ export class MarimoBot {
       before = oldest.id;
     }
     return logs;
-  }
-
-  private async postCurrentMarimoLog(
-    channel: TextChannel,
-    entry: RankingEntry
-  ): Promise<void> {
-    const image = await renderTankImage({
-      seed: `${entry.guildId}:${entry.userId}:${entry.generation}`,
-      sizeMm: entry.sizeMm,
-      ageDays: entry.ageDays
-    });
-    await channel.send({
-      content: currentMarimoLogContent(entry),
-      files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
-      allowedMentions: { parse: [] }
-    });
   }
 
   private async deactivateOldPanel(
@@ -773,6 +764,13 @@ export class MarimoBot {
     if (!(channel instanceof TextChannel)) {
       throw new Error("Configured watering log channel is unavailable");
     }
+    await this.postWateringLogToChannel(channel, watering);
+  }
+
+  private async postWateringLogToChannel(
+    channel: TextChannel,
+    watering: Watering
+  ): Promise<void> {
     const image = await renderTankImage({
       seed: `${watering.marimo.guildId}:${watering.marimo.userId}:${watering.marimo.generation}`,
       sizeMm: watering.sizeMm,
@@ -814,6 +812,13 @@ export class MarimoBot {
     if (config.logChannelId === null) return;
     const channel = await this.client.channels.fetch(config.logChannelId);
     if (!(channel instanceof TextChannel)) return;
+    await this.postDeathLogToChannel(channel, death);
+  }
+
+  private async postDeathLogToChannel(
+    channel: TextChannel,
+    death: DeadMarimo
+  ): Promise<void> {
     const image = await renderTankImage({
       seed: `${death.guildId}:${death.userId}:${death.generation}`,
       sizeMm: death.finalSizeMm,

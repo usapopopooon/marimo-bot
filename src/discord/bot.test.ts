@@ -11,7 +11,12 @@ import {
 } from "discord.js";
 import type { Config } from "../config/env.js";
 import type { MarimoRepository } from "../db/repository.js";
-import type { GuildConfig, RankingEntry, Watering } from "../domain/types.js";
+import type {
+  DeadMarimo,
+  GuildConfig,
+  RankingEntry,
+  Watering
+} from "../domain/types.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
 import { isMarimoImageLog, MarimoBot, missingLogPermissions } from "./bot.js";
 import { NAME_BUTTON_ID, NAME_MODAL_ID } from "./presentation.js";
@@ -62,6 +67,12 @@ const watering: Watering = {
   isBirth: false
 };
 
+const death: DeadMarimo = {
+  ...living,
+  diedAt: new Date("2026-08-10T01:00:00Z"),
+  finalSizeMm: 10.01
+};
+
 type InteractionDispatcher = {
   handleInteraction(interaction: Interaction): Promise<void>;
 };
@@ -88,10 +99,11 @@ type LogRefresher = {
   client: { user: { id: string } | null };
   repostAllLogs(interaction: ChatInputCommandInteraction): Promise<void>;
   findMarimoLogs(channel: TextChannel, botUserId: string): Promise<Message[]>;
-  postCurrentMarimoLog(
+  postWateringLogToChannel(
     channel: TextChannel,
-    entry: RankingEntry
+    watering: Watering
   ): Promise<void>;
+  postDeathLogToChannel(channel: TextChannel, death: DeadMarimo): Promise<void>;
 };
 
 type ClientAccessor = {
@@ -440,10 +452,18 @@ describe("panel interaction wiring", () => {
     expect(markWateringLogDelivered).toHaveBeenCalledWith(watering.eventId);
   });
 
-  it("refreshes all current logs without a completion announcement", async () => {
+  it("reposts the complete event history without a completion announcement", async () => {
+    const laterWatering: Watering = {
+      ...watering,
+      eventId: "00000000-0000-4000-8000-000000000002",
+      wateredAt: new Date("2026-08-10T02:00:00Z"),
+      wateredDate: "2026-08-10",
+      isBirth: false
+    };
     const repository: Partial<MarimoRepository> = {
       setLogChannel: vi.fn().mockResolvedValue(undefined),
-      rankings: vi.fn().mockResolvedValue([living]),
+      wateringLogHistory: vi.fn().mockResolvedValue([watering, laterWatering]),
+      deathLogHistory: vi.fn().mockResolvedValue([death]),
       markGuildWateringLogsDeliveredThrough: vi
         .fn()
         .mockResolvedValue(undefined)
@@ -453,9 +473,11 @@ describe("panel interaction wiring", () => {
     const deleteOldLog = vi.fn().mockResolvedValue(undefined);
     const oldLog = { delete: deleteOldLog } as unknown as Message;
     const findMarimoLogs = vi.fn().mockResolvedValue([oldLog]);
-    const postCurrentMarimoLog = vi.fn().mockResolvedValue(undefined);
+    const postWateringLogToChannel = vi.fn().mockResolvedValue(undefined);
+    const postDeathLogToChannel = vi.fn().mockResolvedValue(undefined);
     bot.findMarimoLogs = findMarimoLogs;
-    bot.postCurrentMarimoLog = postCurrentMarimoLog;
+    bot.postWateringLogToChannel = postWateringLogToChannel;
+    bot.postDeathLogToChannel = postDeathLogToChannel;
     const channel = logChannel();
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const deleteReply = vi.fn().mockResolvedValue(undefined);
@@ -472,8 +494,26 @@ describe("panel interaction wiring", () => {
 
     expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
     expect(findMarimoLogs).toHaveBeenCalledWith(channel, "bot");
-    expect(postCurrentMarimoLog).toHaveBeenCalledWith(channel, living);
-    expect(postCurrentMarimoLog.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(postWateringLogToChannel).toHaveBeenNthCalledWith(
+      1,
+      channel,
+      watering
+    );
+    expect(postDeathLogToChannel).toHaveBeenCalledWith(channel, death);
+    expect(postWateringLogToChannel).toHaveBeenNthCalledWith(
+      2,
+      channel,
+      laterWatering
+    );
+    expect(postWateringLogToChannel.mock.invocationCallOrder[0]).toBeLessThan(
+      postDeathLogToChannel.mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY
+    );
+    expect(postDeathLogToChannel.mock.invocationCallOrder[0]).toBeLessThan(
+      postWateringLogToChannel.mock.invocationCallOrder[1] ??
+        Number.POSITIVE_INFINITY
+    );
+    expect(postWateringLogToChannel.mock.invocationCallOrder[1]).toBeLessThan(
       deleteOldLog.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
     );
     expect(deleteOldLog).toHaveBeenCalledOnce();
@@ -487,9 +527,11 @@ describe("panel interaction wiring", () => {
     const bot = botWith(repository) as unknown as LogRefresher;
     Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
     const findMarimoLogs = vi.fn().mockResolvedValue([]);
-    const postCurrentMarimoLog = vi.fn().mockResolvedValue(undefined);
+    const postWateringLogToChannel = vi.fn().mockResolvedValue(undefined);
+    const postDeathLogToChannel = vi.fn().mockResolvedValue(undefined);
     bot.findMarimoLogs = findMarimoLogs;
-    bot.postCurrentMarimoLog = postCurrentMarimoLog;
+    bot.postWateringLogToChannel = postWateringLogToChannel;
+    bot.postDeathLogToChannel = postDeathLogToChannel;
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await bot.repostAllLogs({
@@ -508,7 +550,8 @@ describe("panel interaction wiring", () => {
       content: "このチャンネルでBotに必要な権限がありません: ファイルを添付"
     });
     expect(findMarimoLogs).not.toHaveBeenCalled();
-    expect(postCurrentMarimoLog).not.toHaveBeenCalled();
+    expect(postWateringLogToChannel).not.toHaveBeenCalled();
+    expect(postDeathLogToChannel).not.toHaveBeenCalled();
     expect(setLogChannel).not.toHaveBeenCalled();
   });
 
@@ -516,15 +559,17 @@ describe("panel interaction wiring", () => {
     const setLogChannel = vi.fn().mockResolvedValue(undefined);
     const repository: Partial<MarimoRepository> = {
       setLogChannel,
-      rankings: vi.fn().mockResolvedValue([living])
+      wateringLogHistory: vi.fn().mockResolvedValue([watering]),
+      deathLogHistory: vi.fn().mockResolvedValue([])
     };
     const bot = botWith(repository) as unknown as LogRefresher;
     Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
     const deleteOldLog = vi.fn().mockResolvedValue(undefined);
     bot.findMarimoLogs = vi.fn().mockResolvedValue([{ delete: deleteOldLog }]);
-    bot.postCurrentMarimoLog = vi
+    bot.postWateringLogToChannel = vi
       .fn()
       .mockRejectedValue(new Error("Discord send failed"));
+    bot.postDeathLogToChannel = vi.fn().mockResolvedValue(undefined);
 
     await expect(
       bot.repostAllLogs({

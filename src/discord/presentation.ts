@@ -120,13 +120,6 @@ export function wateringLogContent(watering: Watering): string {
   ].join("\n");
 }
 
-export function currentMarimoLogContent(entry: RankingEntry): string {
-  return [
-    `🟢 ${ownerMention(entry.userId)} の **${displayMarimoName(entry.name)}**`,
-    `第${entry.generation}世代｜生後 **${entry.ageDays}日**｜**${entry.sizeMm.toFixed(2)} mm**`
-  ].join("\n");
-}
-
 export function deathLogContent(death: DeadMarimo): string {
   return [
     `🥀 ${ownerMention(death.userId)} の **${displayMarimoName(death.name)}** は枯れてしまいました`,
