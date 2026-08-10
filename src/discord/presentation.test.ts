@@ -92,11 +92,10 @@ describe("Discord presentation", () => {
       new Date("2026-08-10T00:00:00Z")
     );
 
-    expect(ranking).toContain("**1位**｜same-a");
-    expect(ranking).toContain("**1位**｜same-b");
-    expect(ranking).toContain("**3位**｜smaller");
+    expect(ranking).toContain("**1位**｜<@same-a>");
+    expect(ranking).toContain("**1位**｜<@same-b>");
+    expect(ranking).toContain("**3位**｜<@smaller>");
     expect(ranking).not.toMatch(/^\d+\. /m);
-    expect(ranking).not.toContain("<@");
   });
 
   it("announces a first interaction as a birth, not a water change", () => {
@@ -118,17 +117,12 @@ describe("Discord presentation", () => {
     expect(birth).not.toContain("水を替えました");
     expect(care).toContain("水を替えました");
     expect(care).not.toContain("が生まれました");
-    expect(birth).toContain("飼い主 new-owner");
-    expect(care).toContain("飼い主 new-owner");
-    expect(birth).not.toContain("<@");
-    expect(care).not.toContain("<@");
+    expect(birth).toContain("<@new-owner>");
+    expect(care).toContain("<@new-owner>");
   });
 
-  it("uses stored owner names instead of unresolved mentions in every image log", () => {
-    const living = {
-      ...entry("owner", 1, 10),
-      ownerDisplayName: "**飼い主**"
-    };
+  it("keeps user mentions in every image log", () => {
+    const living = entry("owner", 1, 10);
     const dead = {
       ...living,
       diedAt: new Date("2026-08-11T15:00:00Z"),
@@ -138,10 +132,8 @@ describe("Discord presentation", () => {
     const current = currentMarimoLogContent(living);
     const memorial = deathLogContent(dead);
 
-    expect(current).toContain("飼い主 \\*\\*飼い主\\*\\*");
-    expect(memorial).toContain("飼い主 \\*\\*飼い主\\*\\*");
-    expect(current).not.toContain("<@");
-    expect(memorial).not.toContain("<@");
+    expect(current).toContain("<@owner>");
+    expect(memorial).toContain("<@owner>");
   });
 
   it("escapes formatting characters in user-defined marimo names", () => {

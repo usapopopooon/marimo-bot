@@ -4,6 +4,7 @@ import {
   Events,
   GatewayIntentBits,
   GuildMember,
+  MessageFlags,
   PermissionFlagsBits,
   REST,
   Routes,
@@ -69,6 +70,21 @@ function configuredChannel(
 }
 
 const MARIMO_LOG_FILES = new Set(["marimo-tank.png", "marimo-memorial.png"]);
+
+export function silentUserMentions(userIds: string[]): {
+  allowedMentions: { users: string[] };
+  flags: MessageFlags.SuppressNotifications;
+} {
+  return {
+    allowedMentions: { users: [...new Set(userIds)] },
+    flags: MessageFlags.SuppressNotifications
+  };
+}
+
+function rankingAllowedMentions(entries: RankingEntry[]): { users: string[] } {
+  return silentUserMentions(entries.map((entry) => entry.userId))
+    .allowedMentions;
+}
 
 export function isMarimoImageLog(message: Message, botUserId: string): boolean {
   return (
@@ -517,7 +533,7 @@ export class MarimoBot {
         : {
             content: rankingContent(entries, now),
             components: [],
-            allowedMentions: { parse: [] }
+            ...silentUserMentions(entries.map((entry) => entry.userId))
           };
     const message = await interaction.channel.send(payload);
     await this.repository.setPanel(
@@ -616,7 +632,7 @@ export class MarimoBot {
     await channel.send({
       content: currentMarimoLogContent(entry),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
-      allowedMentions: { parse: [] }
+      ...silentUserMentions([entry.userId])
     });
   }
 
@@ -739,7 +755,7 @@ export class MarimoBot {
     await message
       .edit({
         content: rankingContent(entries, now),
-        allowedMentions: { parse: [] }
+        allowedMentions: rankingAllowedMentions(entries)
       })
       .catch((error: unknown) => {
         this.logger.warn(
@@ -781,7 +797,7 @@ export class MarimoBot {
     await channel.send({
       content: wateringLogContent(watering),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
-      allowedMentions: { parse: [] }
+      ...silentUserMentions([watering.marimo.userId])
     });
   }
 
@@ -828,7 +844,7 @@ export class MarimoBot {
     await channel.send({
       content: deathLogContent(death),
       files: [new AttachmentBuilder(image, { name: "marimo-memorial.png" })],
-      allowedMentions: { parse: [] }
+      ...silentUserMentions([death.userId])
     });
   }
 
