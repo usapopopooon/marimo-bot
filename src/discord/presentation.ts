@@ -8,7 +8,7 @@ import {
   TextInputBuilder,
   TextInputStyle
 } from "discord.js";
-import type { RankingEntry, Watering } from "../domain/types.js";
+import type { DeadMarimo, RankingEntry, Watering } from "../domain/types.js";
 
 export const WATER_BUTTON_ID = "marimo:water";
 export const STATUS_BUTTON_ID = "marimo:status";
@@ -18,6 +18,10 @@ export const NAME_INPUT_ID = "marimo:name-input";
 
 export function displayMarimoName(name: string): string {
   return escapeMarkdown(name);
+}
+
+function ownerLabel(ownerDisplayName: string): string {
+  return `飼い主 ${escapeMarkdown(ownerDisplayName)}`;
 }
 
 export function waterPanel(waterXp: number): {
@@ -70,7 +74,7 @@ export function nameModal(): ModalBuilder {
 }
 
 function leaderboardLine(entry: RankingEntry, rank: number): string {
-  return `**${rank}位**｜<@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm**｜${displayMarimoName(entry.name)}`;
+  return `**${rank}位**｜${escapeMarkdown(entry.ownerDisplayName)}｜**${entry.sizeMm.toFixed(2)} mm**｜${displayMarimoName(entry.name)}`;
 }
 
 export function rankingContent(
@@ -110,8 +114,22 @@ export function statusContent(entry: RankingEntry): string {
 export function wateringLogContent(watering: Watering): string {
   return [
     watering.isBirth
-      ? `🟢 <@${watering.marimo.userId}> の **${displayMarimoName(watering.marimo.name)}** が生まれました`
-      : `🫧 <@${watering.marimo.userId}> が **${displayMarimoName(watering.marimo.name)}** の水を替えました`,
+      ? `🟢 **${displayMarimoName(watering.marimo.name)}** が生まれました｜${ownerLabel(watering.marimo.ownerDisplayName)}`
+      : `🫧 **${displayMarimoName(watering.marimo.name)}** の水を替えました｜${ownerLabel(watering.marimo.ownerDisplayName)}`,
     `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`
+  ].join("\n");
+}
+
+export function currentMarimoLogContent(entry: RankingEntry): string {
+  return [
+    `🟢 **${displayMarimoName(entry.name)}**｜${ownerLabel(entry.ownerDisplayName)}`,
+    `第${entry.generation}世代｜生後 **${entry.ageDays}日**｜**${entry.sizeMm.toFixed(2)} mm**`
+  ].join("\n");
+}
+
+export function deathLogContent(death: DeadMarimo): string {
+  return [
+    `🥀 **${displayMarimoName(death.name)}** は枯れてしまいました｜${ownerLabel(death.ownerDisplayName)}`,
+    `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
   ].join("\n");
 }

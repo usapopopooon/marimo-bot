@@ -28,6 +28,8 @@ import { renderTankImage } from "../rendering/tank.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
 import {
+  currentMarimoLogContent,
+  deathLogContent,
   displayMarimoName,
   nameModal,
   NAME_BUTTON_ID,
@@ -612,10 +614,7 @@ export class MarimoBot {
       ageDays: entry.ageDays
     });
     await channel.send({
-      content: [
-        `🟢 <@${entry.userId}> の **${displayMarimoName(entry.name)}**`,
-        `第${entry.generation}世代｜生後 **${entry.ageDays}日**｜**${entry.sizeMm.toFixed(2)} mm**`
-      ].join("\n"),
+      content: currentMarimoLogContent(entry),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
       allowedMentions: { parse: [] }
     });
@@ -827,10 +826,7 @@ export class MarimoBot {
       dead: true
     });
     await channel.send({
-      content: [
-        `🥀 <@${death.userId}> の **${displayMarimoName(death.name)}** は枯れてしまいました`,
-        `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
-      ].join("\n"),
+      content: deathLogContent(death),
       files: [new AttachmentBuilder(image, { name: "marimo-memorial.png" })],
       allowedMentions: { parse: [] }
     });
