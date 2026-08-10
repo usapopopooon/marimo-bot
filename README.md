@@ -1,0 +1,96 @@
+# marimo-bot
+
+ユーザーごとに、ただ少しずつ大きくなるまりもを育てる Discord Bot。
+
+## ゲームルール
+
+- まりもは実時間に応じて毎日 `0.3 mm` ずつ、上限なく成長する。
+- 日本時間で1日1回だけ水を替えられ、既定では `5 XP` を獲得する。
+- 水を替えた次の日を丸一日放置すると、その翌日 `0:00 JST` に枯れる。
+- 枯れると次回の水替え時に新しい世代が生まれ、大きさと生存日数はリセットされる。
+- 水替え・死亡時には、設定したログチャンネルへ現在の飼育画面画像を投稿する。
+- 生存日数と大きさのランキングは、水替え・死亡のたびに同じ常設投稿を編集する。
+
+## Discord コマンド
+
+一般ユーザー:
+
+- `/marimo status` — 現在のまりもを表示
+- `/marimo name name:<名前>` — 生きているまりもの名前を変更
+- 水替えパネルの「水を替える」「自分のまりも」ボタン
+
+`サーバーの管理` 権限が必要:
+
+- `/marimo-admin panel type:水替え` — 実行チャンネルへ水替えパネルを投稿
+- `/marimo-admin panel type:生存日数ランキング` — 常設ランキングを投稿
+- `/marimo-admin panel type:大きさランキング` — 常設ランキングを投稿
+- `/marimo-admin log channel:#まりも日記` — 画像ログの投稿先を設定
+- `/marimo-admin log-disable` — 画像ログを停止
+- `/marimo-admin status` — 現在の設定を確認
+
+同種パネルを再投稿すると、以前の水替えパネルは操作不能になり、新しい投稿が正本になる。
+
+## XP連携
+
+水替えとXP付与予定は同じDBトランザクションで確定し、`marimo_xp_awards` に一意な
+`event_id` とともに保存される。`XP_WEBHOOK_URL` を設定すると、未配信イベントを次の
+JSONで繰り返し送信する。
+
+```json
+{
+  "event_id": "uuid",
+  "guild_id": "Discord guild ID",
+  "user_id": "Discord user ID",
+  "channel_id": "Discord channel ID",
+  "awarded_xp": 5,
+  "observed_at": "2026-08-10T12:00:00.000Z"
+}
+```
+
+level-bot 側の受信先は
+`/api/v1/integrations/marimo/watering-events`。両Botに同じ
+`MARIMO_BOT_API_TOKEN` / `XP_WEBHOOK_TOKEN` を設定する。受信側は `event_id` で冪等に
+反映するため、通信失敗後の再送でもXPは重複しない。Webhook未設定時も付与予定は
+outboxに残り、設定後に配信される。
+
+## ローカル起動
+
+必要環境は Node.js 22以上（CIは24）、PostgreSQL 16、Discord Bot Token。
+
+```bash
+cp .env.example .env
+npm install
+docker compose up -d db
+npm run dev
+```
+
+開発サーバーだけにコマンドを即時登録する場合は `.env` の `DISCORD_GUILD_ID` を設定する。
+未指定時はグローバルコマンドとして登録され、Discordへの反映に時間がかかる場合がある。
+
+## 検証
+
+```bash
+npm run format:check
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+DB統合テストは `TEST_DATABASE_URL` が設定されているときに実行される。
+
+## アイコン
+
+Botアイコンは [`public/bot-icon.png`](public/bot-icon.png)。既存アプリの素材は使用せず、
+全面の水色と顔のない緑のまりもだけで構成したオリジナル画像を使用している。
+
+## 生成画像サンプル
+
+実際のログ投稿と同じレンダラーで生成した見本:
+
+- [`public/samples/day-1-10mm.png`](public/samples/day-1-10mm.png) — 生後1日、10 mm
+- [`public/samples/day-87-42mm.png`](public/samples/day-87-42mm.png) — 生後87日、42.5 mm
+- [`public/samples/day-968-300mm.png`](public/samples/day-968-300mm.png) — 画面いっぱいに育った300 mm
+- [`public/samples/memorial-50mm.png`](public/samples/memorial-50mm.png) — 枯れた場合の記録画像
+
+`npm run generate:samples` で同じ4枚を再生成できる。

@@ -1,0 +1,550 @@
+import {
+  AttachmentBuilder,
+  Client,
+  Events,
+  GatewayIntentBits,
+  GuildMember,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+  TextChannel,
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+  type Interaction,
+  type Message
+} from "discord.js";
+import type { Logger } from "pino";
+import type { Config } from "../config/env.js";
+import type { MarimoRepository } from "../db/repository.js";
+import type {
+  DeadMarimo,
+  GuildConfig,
+  PanelKind,
+  RankingEntry,
+  Watering
+} from "../domain/types.js";
+import { renderTankImage } from "../rendering/tank.js";
+import type { XpDelivery } from "../services/xp-delivery.js";
+import { commands } from "./commands.js";
+import {
+  rankingContent,
+  STATUS_BUTTON_ID,
+  statusContent,
+  WATER_BUTTON_ID,
+  waterPanel
+} from "./presentation.js";
+
+function displayName(interaction: ButtonInteraction): string {
+  return interaction.member instanceof GuildMember
+    ? interaction.member.displayName
+    : (interaction.user.globalName ?? interaction.user.username);
+}
+
+function panelIds(
+  config: GuildConfig,
+  kind: PanelKind
+): [string | null, string | null] {
+  if (kind === "water") {
+    return [config.waterPanelChannelId, config.waterPanelMessageId];
+  }
+  if (kind === "age")
+    return [config.agePanelChannelId, config.agePanelMessageId];
+  return [config.sizePanelChannelId, config.sizePanelMessageId];
+}
+
+function configuredChannel(
+  messageId: string | null,
+  channelId: string | null
+): string {
+  return messageId === null || channelId === null
+    ? "未設定"
+    : `<#${channelId}>`;
+}
+
+export class MarimoBot {
+  private readonly client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  private sweepTimer: NodeJS.Timeout | undefined;
+  private xpTimer: NodeJS.Timeout | undefined;
+
+  public constructor(
+    private readonly repository: MarimoRepository,
+    private readonly xpDelivery: XpDelivery,
+    private readonly config: Config,
+    private readonly logger: Logger
+  ) {}
+
+  public async start(): Promise<void> {
+    await this.registerCommands();
+    this.client.on(Events.InteractionCreate, (interaction) => {
+      void this.handleInteraction(interaction);
+    });
+    this.client.once(Events.ClientReady, (readyClient) => {
+      this.logger.info({ user: readyClient.user.tag }, "Discord client ready");
+      this.runInBackground("Startup maintenance", () => this.runMaintenance());
+      this.sweepTimer = setInterval(
+        () =>
+          this.runInBackground("Scheduled death sweep", () =>
+            this.expireNeglected()
+          ),
+        5 * 60_000
+      );
+      this.xpTimer = setInterval(
+        () =>
+          this.runInBackground("Scheduled XP delivery", () =>
+            this.xpDelivery.deliverPending()
+          ),
+        60_000
+      );
+    });
+    await this.client.login(this.config.DISCORD_TOKEN);
+  }
+
+  public async stop(): Promise<void> {
+    if (this.sweepTimer !== undefined) clearInterval(this.sweepTimer);
+    if (this.xpTimer !== undefined) clearInterval(this.xpTimer);
+    await this.client.destroy();
+  }
+
+  private async registerCommands(): Promise<void> {
+    const rest = new REST().setToken(this.config.DISCORD_TOKEN);
+    const route =
+      this.config.DISCORD_GUILD_ID === undefined
+        ? Routes.applicationCommands(this.config.DISCORD_CLIENT_ID)
+        : Routes.applicationGuildCommands(
+            this.config.DISCORD_CLIENT_ID,
+            this.config.DISCORD_GUILD_ID
+          );
+    await rest.put(route, { body: commands });
+    this.logger.info(
+      { scope: this.config.DISCORD_GUILD_ID ?? "global" },
+      "Application commands registered"
+    );
+  }
+
+  private async handleInteraction(interaction: Interaction): Promise<void> {
+    try {
+      if (interaction.isButton()) {
+        if (interaction.customId === WATER_BUTTON_ID)
+          await this.handleWater(interaction);
+        if (interaction.customId === STATUS_BUTTON_ID)
+          await this.handleButtonStatus(interaction);
+        return;
+      }
+      if (!interaction.isChatInputCommand()) return;
+      if (interaction.commandName === "marimo")
+        await this.handleUserCommand(interaction);
+      if (interaction.commandName === "marimo-admin") {
+        await this.handleAdminCommand(interaction);
+      }
+    } catch (error) {
+      this.logger.error({ err: error }, "Interaction failed");
+      const content =
+        "処理に失敗しました。しばらくしてからもう一度お試しください。";
+      if (interaction.isRepliable()) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction
+            .editReply({ content, components: [] })
+            .catch(() => undefined);
+        } else {
+          await interaction
+            .reply({ content, ephemeral: true })
+            .catch(() => undefined);
+        }
+      }
+    }
+  }
+
+  private async handleWater(interaction: ButtonInteraction): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const now = new Date();
+    const guildId = interaction.guildId;
+    const result = await this.repository.water({
+      guildId,
+      userId: interaction.user.id,
+      channelId: interaction.channelId,
+      displayName: displayName(interaction),
+      now,
+      awardedXp: this.config.WATER_XP
+    });
+    if (result.status === "already-watered") {
+      await interaction.editReply({
+        content: [
+          "今日はもう水を替えています。",
+          `**${result.marimo.name}**｜生後${result.ageDays}日｜${result.sizeMm.toFixed(2)} mm`
+        ].join("\n")
+      });
+      return;
+    }
+
+    const death = result.death;
+    if (death !== undefined) {
+      await this.runBestEffort("Death log", () => this.postDeathLog(death));
+    }
+    await this.runBestEffort("Watering log", () =>
+      this.postWateringLog(result.watering)
+    );
+    await this.runBestEffort("Ranking update", () =>
+      this.updateRankings(guildId, now)
+    );
+    this.runInBackground("Immediate XP delivery", () =>
+      this.xpDelivery.deliverPending()
+    );
+    const born =
+      result.watering.marimo.generation === 1 && result.watering.ageDays === 1;
+    await interaction.editReply({
+      content: [
+        result.death === undefined
+          ? born
+            ? `**${result.watering.marimo.name}** が生まれました。`
+            : "水がきれいになりました。"
+          : `先代は枯れてしまいました。第${result.watering.marimo.generation}世代が生まれました。`,
+        `生後 **${result.watering.ageDays}日**｜**${result.watering.sizeMm.toFixed(2)} mm**`,
+        `**+${result.watering.awardedXp} XP**`
+      ].join("\n")
+    });
+  }
+
+  private async handleButtonStatus(
+    interaction: ButtonInteraction
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    const entry = await this.repository.getLiving(
+      interaction.guildId,
+      interaction.user.id,
+      new Date()
+    );
+    await interaction.reply({
+      content:
+        entry === null
+          ? "生きているまりもはいません。「水を替える」から育て始めましょう。"
+          : statusContent(entry),
+      ephemeral: true
+    });
+  }
+
+  private async handleUserCommand(
+    interaction: ChatInputCommandInteraction
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    const subcommand = interaction.options.getSubcommand();
+    if (subcommand === "status") {
+      const entry = await this.repository.getLiving(
+        interaction.guildId,
+        interaction.user.id,
+        new Date()
+      );
+      await interaction.reply({
+        content:
+          entry === null
+            ? "生きているまりもはいません。水替えパネルから育て始めましょう。"
+            : statusContent(entry),
+        ephemeral: true
+      });
+      return;
+    }
+    const name = interaction.options.getString("name", true).trim();
+    const renamed = await this.repository.rename(
+      interaction.guildId,
+      interaction.user.id,
+      name
+    );
+    await interaction.reply({
+      content: renamed
+        ? `まりもの名前を **${name}** に変更しました。`
+        : "生きているまりもがいません。先に水替えパネルから育て始めてください。",
+      ephemeral: true
+    });
+  }
+
+  private async handleAdminCommand(
+    interaction: ChatInputCommandInteraction
+  ): Promise<void> {
+    if (
+      interaction.guildId === null ||
+      interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) !==
+        true
+    ) {
+      await interaction.reply({
+        content: "サーバー管理権限が必要です。",
+        ephemeral: true
+      });
+      return;
+    }
+    const subcommand = interaction.options.getSubcommand();
+    if (subcommand === "panel") {
+      await this.postPanel(interaction);
+      return;
+    }
+    if (subcommand === "log") {
+      const channel = interaction.options.getChannel("channel", true);
+      await this.repository.setLogChannel(interaction.guildId, channel.id);
+      await interaction.reply({
+        content: `画像ログの投稿先を <#${channel.id}> に設定しました。`,
+        ephemeral: true
+      });
+      return;
+    }
+    if (subcommand === "log-disable") {
+      await this.repository.setLogChannel(interaction.guildId, null);
+      await interaction.reply({
+        content: "画像ログを停止しました。",
+        ephemeral: true
+      });
+      return;
+    }
+    const config = await this.repository.getConfig(interaction.guildId);
+    await interaction.reply({
+      content: [
+        "# まりもBot設定",
+        `水替えパネル: ${configuredChannel(config.waterPanelMessageId, config.waterPanelChannelId)}`,
+        `生存日数ランキング: ${configuredChannel(config.agePanelMessageId, config.agePanelChannelId)}`,
+        `大きさランキング: ${configuredChannel(config.sizePanelMessageId, config.sizePanelChannelId)}`,
+        `画像ログ: ${config.logChannelId === null ? "未設定" : `<#${config.logChannelId}>`}`,
+        `XP連携: ${this.xpDelivery.enabled ? "有効" : "未設定（outboxに保持）"}`
+      ].join("\n"),
+      ephemeral: true
+    });
+  }
+
+  private async postPanel(
+    interaction: ChatInputCommandInteraction
+  ): Promise<void> {
+    if (
+      !(interaction.channel instanceof TextChannel) ||
+      interaction.guildId === null
+    ) {
+      await interaction.reply({
+        content: "テキストチャンネルで実行してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const kind = interaction.options.getString("type", true) as PanelKind;
+    const oldConfig = await this.repository.getConfig(interaction.guildId);
+    await this.deactivateOldPanel(oldConfig, kind);
+    const now = new Date();
+    const entries = await this.repository.rankings(interaction.guildId, now);
+    const payload =
+      kind === "water"
+        ? {
+            ...waterPanel(this.config.WATER_XP),
+            allowedMentions: { parse: [] }
+          }
+        : {
+            content: rankingContent(entries, kind, now),
+            components: [],
+            allowedMentions: { parse: [] }
+          };
+    const message = await interaction.channel.send(payload);
+    await this.repository.setPanel(
+      interaction.guildId,
+      kind,
+      interaction.channel.id,
+      message.id
+    );
+    await interaction.editReply({ content: "常設パネルを投稿しました。" });
+  }
+
+  private async deactivateOldPanel(
+    config: GuildConfig,
+    kind: PanelKind
+  ): Promise<void> {
+    const [channelId, messageId] = panelIds(config, kind);
+    if (channelId === null || messageId === null) return;
+    const message = await this.fetchMessage(channelId, messageId);
+    if (message === null) return;
+    const suffix = "\n\n-# このパネルは新しい投稿へ移動しました";
+    await message
+      .edit({
+        content: message.content.includes(suffix)
+          ? message.content
+          : message.content + suffix,
+        components: []
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          { err: error, channelId, messageId },
+          "Old panel disable failed"
+        );
+      });
+  }
+
+  private async updateRankings(guildId: string, now: Date): Promise<void> {
+    const [config, entries] = await Promise.all([
+      this.repository.getConfig(guildId),
+      this.repository.rankings(guildId, now)
+    ]);
+    await Promise.all([
+      this.editRanking(
+        config.agePanelChannelId,
+        config.agePanelMessageId,
+        entries,
+        "age",
+        now
+      ),
+      this.editRanking(
+        config.sizePanelChannelId,
+        config.sizePanelMessageId,
+        entries,
+        "size",
+        now
+      )
+    ]);
+  }
+
+  private async editRanking(
+    channelId: string | null,
+    messageId: string | null,
+    entries: RankingEntry[],
+    kind: "age" | "size",
+    now: Date
+  ): Promise<void> {
+    if (channelId === null || messageId === null) return;
+    const message = await this.fetchMessage(channelId, messageId);
+    if (message === null) return;
+    await message
+      .edit({
+        content: rankingContent(entries, kind, now),
+        allowedMentions: { parse: [] }
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          { err: error, channelId, messageId },
+          "Ranking update failed"
+        );
+      });
+  }
+
+  private async fetchMessage(
+    channelId: string,
+    messageId: string
+  ): Promise<Message | null> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!(channel instanceof TextChannel)) return null;
+      return await channel.messages.fetch(messageId);
+    } catch (error) {
+      this.logger.warn(
+        { err: error, channelId, messageId },
+        "Message fetch failed"
+      );
+      return null;
+    }
+  }
+
+  private async postWateringLog(watering: Watering): Promise<void> {
+    const config = await this.repository.getConfig(watering.marimo.guildId);
+    if (config.logChannelId === null) return;
+    const channel = await this.client.channels.fetch(config.logChannelId);
+    if (!(channel instanceof TextChannel)) return;
+    const image = await renderTankImage({
+      seed: `${watering.marimo.guildId}:${watering.marimo.userId}:${watering.marimo.generation}`,
+      sizeMm: watering.sizeMm,
+      ageDays: watering.ageDays
+    });
+    await channel.send({
+      content: [
+        `🫧 <@${watering.marimo.userId}> が **${watering.marimo.name}** の水を替えました`,
+        `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`
+      ].join("\n"),
+      files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
+      allowedMentions: { parse: [] }
+    });
+  }
+
+  private async postDeathLog(death: DeadMarimo): Promise<void> {
+    const config = await this.repository.getConfig(death.guildId);
+    if (config.logChannelId === null) return;
+    const channel = await this.client.channels.fetch(config.logChannelId);
+    if (!(channel instanceof TextChannel)) return;
+    const image = await renderTankImage({
+      seed: `${death.guildId}:${death.userId}:${death.generation}`,
+      sizeMm: death.finalSizeMm,
+      ageDays: Math.max(
+        1,
+        Math.floor(
+          (death.diedAt.getTime() - death.bornAt.getTime()) / 86_400_000
+        ) + 1
+      ),
+      dead: true
+    });
+    await channel.send({
+      content: [
+        `🥀 <@${death.userId}> の **${death.name}** は枯れてしまいました`,
+        `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
+      ].join("\n"),
+      files: [new AttachmentBuilder(image, { name: "marimo-memorial.png" })],
+      allowedMentions: { parse: [] }
+    });
+  }
+
+  private async expireNeglected(): Promise<void> {
+    const now = new Date();
+    const owners = await this.repository.dueOwners(now);
+    const changedGuilds = new Set<string>();
+    for (const owner of owners) {
+      const death = await this.repository.expireOne(
+        owner.guildId,
+        owner.userId,
+        now
+      );
+      if (death === null) continue;
+      await this.runBestEffort("Scheduled death log", () =>
+        this.postDeathLog(death)
+      );
+      changedGuilds.add(owner.guildId);
+    }
+    await Promise.allSettled(
+      [...changedGuilds].map(async (guildId) =>
+        this.runBestEffort("Scheduled ranking update", () =>
+          this.updateRankings(guildId, now)
+        )
+      )
+    );
+  }
+
+  private async runMaintenance(): Promise<void> {
+    await this.expireNeglected();
+    await this.xpDelivery.deliverPending();
+  }
+
+  private async runBestEffort(
+    operation: string,
+    task: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await task();
+    } catch (error) {
+      this.logger.error(
+        { err: error, operation },
+        "Discord side effect failed"
+      );
+    }
+  }
+
+  private runInBackground(operation: string, task: () => Promise<void>): void {
+    void task().catch((error: unknown) => {
+      this.logger.error({ err: error, operation }, "Background task failed");
+    });
+  }
+}
