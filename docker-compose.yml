@@ -7,11 +7,11 @@ services:
       POSTGRES_PASSWORD: postgres
       # Coolify adds its runtime env_file to every Compose service. Explicitly
       # remove bot-only settings from PostgreSQL's container environment.
-      DISCORD_TOKEN: ""
-      WATER_XP: ""
-      XP_WEBHOOK_URL: ""
-      XP_WEBHOOK_TOKEN: ""
-      LOG_LEVEL: ""
+      DISCORD_TOKEN:
+      WATER_XP:
+      XP_WEBHOOK_URL:
+      XP_WEBHOOK_TOKEN:
+      LOG_LEVEL:
     ports:
       - "5433:5432"
     healthcheck:

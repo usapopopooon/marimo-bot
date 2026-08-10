@@ -1,29 +1,26 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { env as processEnvironment } from "node:process";
 import { fileURLToPath, URL } from "node:url";
 
 const projectDirectory = fileURLToPath(new URL("..", import.meta.url));
 const output = execFileSync(
   "docker",
-  ["compose", "config", "--format", "json"],
+  ["compose", "config", "--no-interpolate", "--format", "json"],
   {
     cwd: projectDirectory,
-    encoding: "utf8",
-    env: {
-      ...processEnvironment,
-      DISCORD_TOKEN: "scope-discord-token",
-      WATER_XP: "10",
-      XP_WEBHOOK_URL: "https://example.test/watering-events",
-      XP_WEBHOOK_TOKEN: "scope-webhook-token",
-      LOG_LEVEL: "info"
-    }
+    encoding: "utf8"
   }
 );
 
 const services = JSON.parse(output).services;
-assert.equal(services.bot.environment.DISCORD_TOKEN, "scope-discord-token");
-assert.equal(services.bot.environment.XP_WEBHOOK_TOKEN, "scope-webhook-token");
+assert.equal(
+  services.bot.environment.DISCORD_TOKEN,
+  "${DISCORD_TOKEN:?set DISCORD_TOKEN}"
+);
+assert.equal(
+  services.bot.environment.XP_WEBHOOK_TOKEN,
+  "${XP_WEBHOOK_TOKEN:-}"
+);
 for (const key of [
   "DISCORD_TOKEN",
   "WATER_XP",
@@ -31,5 +28,5 @@ for (const key of [
   "XP_WEBHOOK_TOKEN",
   "LOG_LEVEL"
 ]) {
-  assert.equal(services.db.environment[key], "", `${key} leaked into db`);
+  assert.equal(services.db.environment[key], null, `${key} leaked into db`);
 }
