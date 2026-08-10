@@ -111,4 +111,19 @@ suite("MarimoRepository integration", () => {
       awards.filter((award) => award.guildId === input.guildId)
     ).toHaveLength(2);
   });
+
+  it("clears the retired age leaderboard configuration", async () => {
+    await pool.query(
+      `INSERT INTO marimo_guild_configs (
+         guild_id, age_panel_channel_id, age_panel_message_id
+       ) VALUES ($1, $2, $3)`,
+      ["1003", "3003", "4003"]
+    );
+
+    await repository.clearAgePanel("1003");
+
+    const config = await repository.getConfig("1003");
+    expect(config.agePanelChannelId).toBeNull();
+    expect(config.agePanelMessageId).toBeNull();
+  });
 });

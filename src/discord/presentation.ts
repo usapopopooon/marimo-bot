@@ -63,33 +63,20 @@ export function nameModal(): ModalBuilder {
     .addLabelComponents(label);
 }
 
-function leaderboardLine(
-  entry: RankingEntry,
-  index: number,
-  kind: "age" | "size"
-): string {
-  const value =
-    kind === "age" ? `${entry.ageDays}日` : `${entry.sizeMm.toFixed(2)} mm`;
-  return `${index + 1}. <@${entry.userId}>｜**${value}**｜${entry.name}`;
+function leaderboardLine(entry: RankingEntry, index: number): string {
+  return `${index + 1}. <@${entry.userId}>｜**${entry.sizeMm.toFixed(2)} mm（生後${entry.ageDays}日）**｜${entry.name}`;
 }
 
 export function rankingContent(
   entries: RankingEntry[],
-  kind: "age" | "size",
   updatedAt: Date
 ): string {
   const sorted = [...entries]
-    .sort((left, right) =>
-      kind === "age" ? right.ageDays - left.ageDays : right.sizeMm - left.sizeMm
-    )
+    .sort((left, right) => right.sizeMm - left.sizeMm)
     .slice(0, 10);
-  const title =
-    kind === "age" ? "🏆 ご長寿まりもランキング" : "📏 巨大まりもランキング";
-  const lines = sorted.map((entry, index) =>
-    leaderboardLine(entry, index, kind)
-  );
+  const lines = sorted.map(leaderboardLine);
   return [
-    `# ${title}`,
+    "# 📏 巨大まりもランキング",
     lines.length === 0 ? "まだ生きているまりもはいません。" : lines.join("\n"),
     "",
     `-# 最終更新 <t:${Math.floor(updatedAt.getTime() / 1000)}:R>`

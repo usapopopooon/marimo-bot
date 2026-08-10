@@ -52,8 +52,6 @@ function panelIds(
   if (kind === "water") {
     return [config.waterPanelChannelId, config.waterPanelMessageId];
   }
-  if (kind === "age")
-    return [config.agePanelChannelId, config.agePanelMessageId];
   return [config.sizePanelChannelId, config.sizePanelMessageId];
 }
 
@@ -334,7 +332,6 @@ export class MarimoBot {
       content: [
         "# まりもBot設定",
         `水替えパネル: ${configuredChannel(config.waterPanelMessageId, config.waterPanelChannelId)}`,
-        `生存日数ランキング: ${configuredChannel(config.agePanelMessageId, config.agePanelChannelId)}`,
         `大きさランキング: ${configuredChannel(config.sizePanelMessageId, config.sizePanelChannelId)}`,
         `画像ログ: ${config.logChannelId === null ? "未設定" : `<#${config.logChannelId}>`}`,
         `XP連携: ${this.xpDelivery.enabled ? "有効" : "未設定（outboxに保持）"}`
@@ -369,7 +366,7 @@ export class MarimoBot {
             allowedMentions: { parse: [] }
           }
         : {
-            content: rankingContent(entries, kind, now),
+            content: rankingContent(entries, now),
             components: [],
             allowedMentions: { parse: [] }
           };
@@ -412,22 +409,12 @@ export class MarimoBot {
       this.repository.getConfig(guildId),
       this.repository.rankings(guildId, now)
     ]);
-    await Promise.all([
-      this.editRanking(
-        config.agePanelChannelId,
-        config.agePanelMessageId,
-        entries,
-        "age",
-        now
-      ),
-      this.editRanking(
-        config.sizePanelChannelId,
-        config.sizePanelMessageId,
-        entries,
-        "size",
-        now
-      )
-    ]);
+    await this.editRanking(
+      config.sizePanelChannelId,
+      config.sizePanelMessageId,
+      entries,
+      now
+    );
   }
 
   private async refreshWaterPanels(): Promise<void> {
@@ -454,11 +441,45 @@ export class MarimoBot {
     );
   }
 
+  private async retireAgePanels(): Promise<void> {
+    await Promise.all(
+      [...this.client.guilds.cache.keys()].map((guildId) =>
+        this.runBestEffort("Age panel retirement", async () => {
+          const config = await this.repository.getConfig(guildId);
+          if (
+            config.agePanelChannelId === null &&
+            config.agePanelMessageId === null
+          )
+            return;
+          if (
+            config.agePanelChannelId !== null &&
+            config.agePanelMessageId !== null
+          ) {
+            const message = await this.fetchMessage(
+              config.agePanelChannelId,
+              config.agePanelMessageId
+            );
+            if (message !== null) {
+              await message.edit({
+                content: [
+                  "# 生存日数ランキングは終了しました",
+                  "大きさランキングへ統合されました。"
+                ].join("\n"),
+                components: [],
+                allowedMentions: { parse: [] }
+              });
+            }
+          }
+          await this.repository.clearAgePanel(guildId);
+        })
+      )
+    );
+  }
+
   private async editRanking(
     channelId: string | null,
     messageId: string | null,
     entries: RankingEntry[],
-    kind: "age" | "size",
     now: Date
   ): Promise<void> {
     if (channelId === null || messageId === null) return;
@@ -466,7 +487,7 @@ export class MarimoBot {
     if (message === null) return;
     await message
       .edit({
-        content: rankingContent(entries, kind, now),
+        content: rankingContent(entries, now),
         allowedMentions: { parse: [] }
       })
       .catch((error: unknown) => {
@@ -566,6 +587,7 @@ export class MarimoBot {
   }
 
   private async runMaintenance(): Promise<void> {
+    await this.retireAgePanels();
     await this.refreshWaterPanels();
     await this.expireNeglected();
     await this.xpDelivery.deliverPending();

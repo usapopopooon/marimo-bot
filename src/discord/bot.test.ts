@@ -47,6 +47,16 @@ type InteractionDispatcher = {
   handleInteraction(interaction: Interaction): Promise<void>;
 };
 
+type RankingUpdater = {
+  updateRankings(guildId: string, now: Date): Promise<void>;
+  editRanking(
+    channelId: string | null,
+    messageId: string | null,
+    entries: RankingEntry[],
+    now: Date
+  ): Promise<void>;
+};
+
 function botWith(repository: Partial<MarimoRepository>): MarimoBot {
   return new MarimoBot(
     repository as MarimoRepository,
@@ -77,6 +87,34 @@ describe("panel interaction wiring", () => {
     expect(showModal.mock.calls[0]?.[0].toJSON()).toMatchObject({
       custom_id: NAME_MODAL_ID
     });
+  });
+
+  it("updates only the combined size leaderboard", async () => {
+    const configured = {
+      ...guildConfig,
+      agePanelChannelId: "old-age-channel",
+      agePanelMessageId: "old-age-message",
+      sizePanelChannelId: "size-channel",
+      sizePanelMessageId: "size-message"
+    };
+    const repository: Partial<MarimoRepository> = {
+      getConfig: vi.fn().mockResolvedValue(configured),
+      rankings: vi.fn().mockResolvedValue([living])
+    };
+    const bot = botWith(repository) as unknown as RankingUpdater;
+    const editRanking = vi.fn().mockResolvedValue(undefined);
+    bot.editRanking = editRanking;
+    const now = new Date("2026-08-10T00:00:00Z");
+
+    await bot.updateRankings("1001", now);
+
+    expect(editRanking).toHaveBeenCalledOnce();
+    expect(editRanking).toHaveBeenCalledWith(
+      "size-channel",
+      "size-message",
+      [living],
+      now
+    );
   });
 
   it("passes modal guild, user, and trimmed name to rename", async () => {

@@ -39,7 +39,7 @@ export type RankingEntry = LivingMarimo & {
   ageDays: number;
 };
 
-export type PanelKind = "water" | "age" | "size";
+export type PanelKind = "water" | "size";
 
 export type GuildConfig = {
   guildId: string;

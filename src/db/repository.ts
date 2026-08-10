@@ -39,7 +39,6 @@ const panelColumns: Record<PanelKind, { channel: string; message: string }> = {
     channel: "water_panel_channel_id",
     message: "water_panel_message_id"
   },
-  age: { channel: "age_panel_channel_id", message: "age_panel_message_id" },
   size: { channel: "size_panel_channel_id", message: "size_panel_message_id" }
 };
 
@@ -400,6 +399,16 @@ export class MarimoRepository {
          ${columns.message} = EXCLUDED.${columns.message},
          updated_at = NOW()`,
       [guildId, channelId, messageId]
+    );
+  }
+
+  public async clearAgePanel(guildId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_guild_configs
+       SET age_panel_channel_id = NULL, age_panel_message_id = NULL,
+           updated_at = NOW()
+       WHERE guild_id = $1`,
+      [guildId]
     );
   }
 

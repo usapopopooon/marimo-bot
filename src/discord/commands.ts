@@ -20,7 +20,6 @@ export const commands = [
             .setRequired(true)
             .addChoices(
               { name: "水替え", value: "water" },
-              { name: "生存日数ランキング", value: "age" },
               { name: "大きさランキング", value: "size" }
             )
         )
