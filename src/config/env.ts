@@ -11,7 +11,7 @@ const schema = z.object({
   DISCORD_GUILD_ID: z.string().regex(/^\d+$/).optional(),
   DATABASE_URL: z.string().url(),
   DATABASE_REQUIRE_SSL: booleanString,
-  WATER_XP: z.coerce.number().int().min(1).max(1000).default(5),
+  WATER_XP: z.coerce.number().int().min(1).max(1000).default(10),
   XP_WEBHOOK_URL: z.string().url().optional(),
   XP_WEBHOOK_TOKEN: z.string().min(1).optional(),
   LOG_LEVEL: z

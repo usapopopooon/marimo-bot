@@ -26,7 +26,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-10T03:00:00Z"),
-      awardedXp: 5
+      awardedXp: 10
     });
     const duplicate = await repository.water({
       guildId: "1001",
@@ -34,7 +34,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-10T08:00:00Z"),
-      awardedXp: 5
+      awardedXp: 10
     });
     const nextGeneration = await repository.water({
       guildId: "1001",
@@ -42,7 +42,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-12T15:00:00Z"),
-      awardedXp: 5
+      awardedXp: 10
     });
 
     expect(first.status).toBe("watered");
@@ -55,7 +55,7 @@ suite("MarimoRepository integration", () => {
 
     const awards = await repository.pendingXp();
     expect(awards).toHaveLength(2);
-    expect(awards.map((award) => award.awardedXp)).toEqual([5, 5]);
+    expect(awards.map((award) => award.awardedXp)).toEqual([10, 10]);
 
     const rankings = await repository.rankings(
       "1001",
@@ -71,7 +71,7 @@ suite("MarimoRepository integration", () => {
       userId: "2002",
       channelId: "3002",
       displayName: "境界",
-      awardedXp: 5
+      awardedXp: 10
     };
     await repository.water({
       ...input,

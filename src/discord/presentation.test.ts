@@ -20,9 +20,9 @@ function entry(userId: string, age: number, size: number): RankingEntry {
 
 describe("Discord presentation", () => {
   it("explains the hard reset and exact daily XP", () => {
-    const panel = waterPanel(5);
+    const panel = waterPanel(10);
     expect(panel.content).toContain("1日1回");
-    expect(panel.content).toContain("5 XP");
+    expect(panel.content).toContain("10 XP");
     expect(panel.content).toContain("枯れてしまい");
     expect(panel.components[0]?.components).toHaveLength(2);
   });
