@@ -90,9 +90,10 @@ describe("Discord presentation", () => {
       new Date("2026-08-10T00:00:00Z")
     );
 
-    expect(ranking).toContain("1. <@same-a>");
-    expect(ranking).toContain("1. <@same-b>");
-    expect(ranking).toContain("3. <@smaller>");
+    expect(ranking).toContain("**1位**｜<@same-a>");
+    expect(ranking).toContain("**1位**｜<@same-b>");
+    expect(ranking).toContain("**3位**｜<@smaller>");
+    expect(ranking).not.toMatch(/^\d+\. /m);
   });
 
   it("announces a first interaction as a birth, not a water change", () => {
