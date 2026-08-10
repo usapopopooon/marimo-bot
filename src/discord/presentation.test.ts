@@ -6,7 +6,7 @@ import {
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
   NAME_MODAL_ID,
-  rankingContent,
+  rankingPanel,
   wateringLogContent,
   waterPanel,
   WATER_BUTTON_ID
@@ -31,10 +31,15 @@ function entry(userId: string, age: number, size: number): RankingEntry {
 describe("Discord presentation", () => {
   it("explains the hard reset and exact daily XP", () => {
     const panel = waterPanel(100);
-    expect(panel.content).toContain("自分のまりもが生まれ、**100 XP**");
-    expect(panel.content).toContain("1日1回");
-    expect(panel.content).toContain("100 XP");
-    expect(panel.content).toContain("枯れてしまい");
+    const embed = panel.embeds[0]?.toJSON();
+    expect(panel.content).toBe("");
+    expect(panel.embeds).toHaveLength(1);
+    expect(embed?.title).toBe("🟢 まりもちゃん");
+    expect(embed?.description).toContain("自分のまりもが生まれ、**100 XP**");
+    expect(embed?.description).toContain("1日1回");
+    expect(embed?.description).toContain("100 XP");
+    expect(embed?.description).toContain("枯れてしまい");
+    expect(embed?.footer?.text).toBe("日付は日本時間の0:00に切り替わります");
     expect(panel.components[0]?.components).toHaveLength(3);
     expect(
       panel.components[0]?.components.map((component) => component.toJSON())
@@ -70,8 +75,14 @@ describe("Discord presentation", () => {
     const entries = [entry("young-large", 2, 99), entry("old-small", 20, 12)];
     const updated = new Date("2026-08-10T00:00:00Z");
 
-    const ranking = rankingContent(entries, updated);
+    const panel = rankingPanel(entries, updated);
+    const ranking = [
+      panel.embeds[0]?.data.title,
+      panel.embeds[0]?.data.description
+    ].join("\n");
 
+    expect(panel.content).toBe("");
+    expect(panel.components).toEqual([]);
     expect(ranking).toContain("巨大まりもランキング");
     expect(ranking).not.toContain("ご長寿");
     expect(ranking).toContain("99.00 mm");
@@ -82,14 +93,14 @@ describe("Discord presentation", () => {
   });
 
   it("gives every displayed size tie the same rank", () => {
-    const ranking = rankingContent(
+    const ranking = rankingPanel(
       [
         entry("same-a", 2, 99),
         entry("same-b", 20, 99.001),
         entry("smaller", 30, 12)
       ],
       new Date("2026-08-10T00:00:00Z")
-    );
+    ).embeds[0]?.data.description;
 
     expect(ranking).toContain("**1位**｜<@same-a>");
     expect(ranking).toContain("**1位**｜<@same-b>");
@@ -139,7 +150,8 @@ describe("Discord presentation", () => {
 
   it("escapes formatting characters in user-defined marimo names", () => {
     const marimo = { ...entry("owner", 1, 10), name: "**巨大**_まりも_" };
-    const status = rankingContent([marimo], new Date("2026-08-10T00:00:00Z"));
+    const status = rankingPanel([marimo], new Date("2026-08-10T00:00:00Z"))
+      .embeds[0]?.data.description;
 
     expect(status).toContain("\\*\\*巨大\\*\\*\\_まりも\\_");
     expect(status).not.toContain("｜**巨大**_まりも_");

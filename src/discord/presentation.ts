@@ -2,6 +2,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
   escapeMarkdown,
   LabelBuilder,
   ModalBuilder,
@@ -15,6 +16,7 @@ export const STATUS_BUTTON_ID = "marimo:status";
 export const NAME_BUTTON_ID = "marimo:name";
 export const NAME_MODAL_ID = "marimo:name-modal";
 export const NAME_INPUT_ID = "marimo:name-input";
+const MARIMO_GREEN = 0x20a51f;
 
 export function displayMarimoName(name: string): string {
   return escapeMarkdown(name);
@@ -26,6 +28,7 @@ function ownerMention(userId: string): string {
 
 export function waterPanel(waterXp: number): {
   content: string;
+  embeds: EmbedBuilder[];
   components: ActionRowBuilder<ButtonBuilder>[];
 } {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -44,14 +47,20 @@ export function waterPanel(waterXp: number): {
       .setStyle(ButtonStyle.Secondary)
   );
   return {
-    content: [
-      "# 🟢 まりもちゃん",
-      "まりもは時間とともに、どこまでも大きくなります。",
-      `初回は自分のまりもが生まれ、**${waterXp} XP**を獲得します。`,
-      `以後も1日1回水を替えると **${waterXp} XP**。丸一日忘れると枯れてしまい、次の世代へリセットされます。`,
-      "",
-      "-# 日付は日本時間の0:00に切り替わります"
-    ].join("\n"),
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setColor(MARIMO_GREEN)
+        .setTitle("🟢 まりもちゃん")
+        .setDescription(
+          [
+            "まりもは時間とともに、どこまでも大きくなります。",
+            `初回は自分のまりもが生まれ、**${waterXp} XP**を獲得します。`,
+            `以後も1日1回水を替えると **${waterXp} XP**。丸一日忘れると枯れてしまい、次の世代へリセットされます。`
+          ].join("\n")
+        )
+        .setFooter({ text: "日付は日本時間の0:00に切り替わります" })
+    ],
     components: [row]
   };
 }
@@ -77,10 +86,10 @@ function leaderboardLine(entry: RankingEntry, rank: number): string {
   return `**${rank}位**｜${ownerMention(entry.userId)}｜**${entry.sizeMm.toFixed(2)} mm**｜${displayMarimoName(entry.name)}`;
 }
 
-export function rankingContent(
+export function rankingPanel(
   entries: RankingEntry[],
   updatedAt: Date
-): string {
+): { content: string; embeds: EmbedBuilder[]; components: [] } {
   const sorted = [...entries]
     .sort((left, right) => right.sizeMm - left.sizeMm)
     .slice(0, 10);
@@ -92,12 +101,21 @@ export function rankingContent(
     previousSize = displayedSize;
     return leaderboardLine(entry, rank);
   });
-  return [
-    "# 📏 巨大まりもランキング",
+  const description = [
     lines.length === 0 ? "まだ生きているまりもはいません。" : lines.join("\n"),
     "",
     `-# 最終更新 <t:${Math.floor(updatedAt.getTime() / 1000)}:R>`
   ].join("\n");
+  return {
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setColor(MARIMO_GREEN)
+        .setTitle("📏 巨大まりもランキング")
+        .setDescription(description)
+    ],
+    components: []
+  };
 }
 
 export function statusContent(entry: RankingEntry): string {

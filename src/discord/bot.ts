@@ -34,7 +34,7 @@ import {
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
   NAME_MODAL_ID,
-  rankingContent,
+  rankingPanel,
   STATUS_BUTTON_ID,
   statusContent,
   WATER_BUTTON_ID,
@@ -88,6 +88,12 @@ const LOG_POST_PERMISSIONS = [
   [PermissionFlagsBits.AttachFiles, "ファイルを添付"]
 ] as const;
 
+const PANEL_POST_PERMISSIONS = [
+  [PermissionFlagsBits.ViewChannel, "チャンネルを見る"],
+  [PermissionFlagsBits.SendMessages, "メッセージを送信"],
+  [PermissionFlagsBits.EmbedLinks, "リンクを埋め込む"]
+] as const;
+
 export function missingLogPermissions(
   permissions: PermissionChecker | null,
   includeHistory = false
@@ -107,6 +113,17 @@ export function missingLogPermissions(
   return required
     .filter(([permission]) => !permissions.has(permission))
     .map(([, label]) => label);
+}
+
+export function missingPanelPermissions(
+  permissions: PermissionChecker | null
+): string[] {
+  if (permissions === null) {
+    return PANEL_POST_PERMISSIONS.map(([, label]) => label);
+  }
+  return PANEL_POST_PERMISSIONS.filter(
+    ([permission]) => !permissions.has(permission)
+  ).map(([, label]) => label);
 }
 
 export function hasMarimoAccess(
@@ -622,9 +639,9 @@ export class MarimoBot {
     }
     const botUserId = this.client.user?.id;
     if (botUserId === undefined) throw new Error("Discord client is not ready");
-    const missing = missingLogPermissions(
+    const missing = missingPanelPermissions(
       interaction.channel.permissionsFor(botUserId)
-    ).filter((permission) => permission !== "ファイルを添付");
+    );
     if (missing.length > 0) {
       await interaction.reply({
         content: `このチャンネルでBotに必要な権限がありません: ${missing.join("、")}`,
@@ -644,8 +661,7 @@ export class MarimoBot {
             allowedMentions: { parse: [] }
           }
         : {
-            content: rankingContent(entries, now),
-            components: [],
+            ...rankingPanel(entries, now),
             allowedMentions: { parse: [] }
           };
     const message = await interaction.channel.send(payload);
@@ -859,7 +875,7 @@ export class MarimoBot {
     if (message === null) return;
     await message
       .edit({
-        content: rankingContent(entries, now),
+        ...rankingPanel(entries, now),
         allowedMentions: { parse: [] }
       })
       .catch((error: unknown) => {

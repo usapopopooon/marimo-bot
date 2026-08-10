@@ -22,7 +22,8 @@ import {
   hasMarimoAccess,
   isMarimoImageLog,
   MarimoBot,
-  missingLogPermissions
+  missingLogPermissions,
+  missingPanelPermissions
 } from "./bot.js";
 import {
   NAME_BUTTON_ID,
@@ -91,12 +92,14 @@ type RankingUpdater = {
   client: { guilds: { cache: Map<string, unknown> } };
   updateRankings(guildId: string, now: Date): Promise<void>;
   refreshRankingPanels(): Promise<void>;
+  refreshWaterPanels(): Promise<void>;
   editRanking(
     channelId: string | null,
     messageId: string | null,
     entries: RankingEntry[],
     now: Date
   ): Promise<void>;
+  fetchMessage(channelId: string, messageId: string): Promise<Message | null>;
 };
 
 type WateringLogDeliverer = {
@@ -176,7 +179,8 @@ function textChannelWithSend(
   send: (...args: unknown[]) => Promise<unknown>,
   flags: bigint[] = [
     PermissionFlagsBits.ViewChannel,
-    PermissionFlagsBits.SendMessages
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.EmbedLinks
   ]
 ): TextChannel {
   const channel = Object.create(TextChannel.prototype) as TextChannel;
@@ -215,6 +219,15 @@ describe("panel interaction wiring", () => {
       "ファイルを添付",
       "メッセージ履歴を読む"
     ]);
+  });
+
+  it("requires embed permission for persistent panels", () => {
+    const permissions = new PermissionsBitField([
+      PermissionFlagsBits.ViewChannel,
+      PermissionFlagsBits.SendMessages
+    ]);
+
+    expect(missingPanelPermissions(permissions)).toEqual(["リンクを埋め込む"]);
   });
 
   it("allows everyone when roles are unset and otherwise requires a role or manager", () => {
@@ -496,6 +509,58 @@ describe("panel interaction wiring", () => {
       [living],
       now
     );
+  });
+
+  it("converts the existing water panel to an embed during refresh", async () => {
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue({
+        ...guildConfig,
+        waterPanelChannelId: "water-channel",
+        waterPanelMessageId: "water-message"
+      })
+    }) as unknown as RankingUpdater;
+    bot.client.guilds.cache.set("1001", {});
+    const edit = vi.fn().mockResolvedValue(undefined);
+    bot.fetchMessage = vi.fn().mockResolvedValue({ edit });
+
+    await bot.refreshWaterPanels();
+
+    expect(edit).toHaveBeenCalledOnce();
+    expect(edit.mock.calls[0]?.[0]).toMatchObject({
+      content: "",
+      allowedMentions: { parse: [] }
+    });
+    const payload = edit.mock.calls[0]?.[0] as {
+      embeds: { data: { title?: string } }[];
+      components: unknown[];
+    };
+    expect(payload.embeds[0]?.data.title).toBe("🟢 まりもちゃん");
+    expect(payload.components).toHaveLength(1);
+  });
+
+  it("converts the existing ranking panel to an embed during update", async () => {
+    const bot = botWith({}) as unknown as RankingUpdater;
+    const edit = vi.fn().mockResolvedValue(undefined);
+    bot.fetchMessage = vi.fn().mockResolvedValue({ edit });
+
+    await bot.editRanking(
+      "size-channel",
+      "size-message",
+      [living],
+      new Date("2026-08-10T00:00:00Z")
+    );
+
+    expect(edit).toHaveBeenCalledOnce();
+    expect(edit.mock.calls[0]?.[0]).toMatchObject({
+      content: "",
+      components: [],
+      allowedMentions: { parse: [] }
+    });
+    const payload = edit.mock.calls[0]?.[0] as {
+      embeds: { data: { title?: string; description?: string } }[];
+    };
+    expect(payload.embeds[0]?.data.title).toBe("📏 巨大まりもランキング");
+    expect(payload.embeds[0]?.data.description).toContain("<@2001>");
   });
 
   it("refreshes every existing ranking panel on startup", async () => {
