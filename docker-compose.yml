@@ -20,9 +20,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/marimo
+      DATABASE_REQUIRE_SSL: "false"
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      WATER_XP: ${WATER_XP:-10}
+      XP_WEBHOOK_URL: ${XP_WEBHOOK_URL:-}
+      XP_WEBHOOK_TOKEN: ${XP_WEBHOOK_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     restart: unless-stopped
 
 volumes:

@@ -5,15 +5,22 @@ const booleanString = z
   .default("false")
   .transform((value) => value === "true");
 
+function optionalEnvironmentValue<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    schema.optional()
+  );
+}
+
 const schema = z.object({
   DISCORD_TOKEN: z.string().min(1),
   DISCORD_CLIENT_ID: z.string().regex(/^\d+$/),
-  DISCORD_GUILD_ID: z.string().regex(/^\d+$/).optional(),
+  DISCORD_GUILD_ID: optionalEnvironmentValue(z.string().regex(/^\d+$/)),
   DATABASE_URL: z.string().url(),
   DATABASE_REQUIRE_SSL: booleanString,
   WATER_XP: z.coerce.number().int().min(1).max(1000).default(10),
-  XP_WEBHOOK_URL: z.string().url().optional(),
-  XP_WEBHOOK_TOKEN: z.string().min(1).optional(),
+  XP_WEBHOOK_URL: optionalEnvironmentValue(z.string().url()),
+  XP_WEBHOOK_TOKEN: optionalEnvironmentValue(z.string().min(1)),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info")
