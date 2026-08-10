@@ -189,6 +189,43 @@ suite("MarimoRepository integration", () => {
     ).toHaveLength(2);
   });
 
+  it("ranks different start times on the same JST date at the same daily size", async () => {
+    const input = {
+      guildId: "1006",
+      channelId: "3006",
+      displayName: "同日組",
+      awardedXp: 100
+    };
+    await repository.water({
+      ...input,
+      userId: "2006",
+      now: new Date("2026-08-10T03:00:00.000Z")
+    });
+    await repository.water({
+      ...input,
+      userId: "2007",
+      now: new Date("2026-08-10T14:59:59.999Z")
+    });
+
+    const rankings = (
+      await repository.rankings(
+        input.guildId,
+        new Date("2026-08-10T15:01:00.000Z")
+      )
+    ).sort((left, right) => left.userId.localeCompare(right.userId));
+
+    expect(
+      rankings.map((entry) => ({
+        userId: entry.userId,
+        ageDays: entry.ageDays,
+        sizeMm: entry.sizeMm
+      }))
+    ).toEqual([
+      { userId: "2006", ageDays: 2, sizeMm: 10.3 },
+      { userId: "2007", ageDays: 2, sizeMm: 10.3 }
+    ]);
+  });
+
   it("grants the XP difference once for both delivered and uncertain old awards", async () => {
     const delivered = await repository.water({
       guildId: "1004",

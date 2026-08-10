@@ -29,13 +29,19 @@ export function isDead(lastWateredDate: string, now: Date): boolean {
   return now.getTime() >= deathAt(lastWateredDate).getTime();
 }
 
+function elapsedJstCalendarDays(from: Date, to: Date): number {
+  const fromMidnight = Date.parse(`${jstDate(from)}T00:00:00.000Z`);
+  const toMidnight = Date.parse(`${jstDate(to)}T00:00:00.000Z`);
+  return Math.max(0, (toMidnight - fromMidnight) / DAY_MS);
+}
+
 export function sizeAt(bornAt: Date, at: Date): number {
-  const elapsedDays = Math.max(0, at.getTime() - bornAt.getTime()) / DAY_MS;
+  const elapsedDays = elapsedJstCalendarDays(bornAt, at);
   return (
     Math.round((INITIAL_SIZE_MM + elapsedDays * DAILY_GROWTH_MM) * 100) / 100
   );
 }
 
 export function ageDays(bornAt: Date, at: Date): number {
-  return Math.floor(Math.max(0, at.getTime() - bornAt.getTime()) / DAY_MS) + 1;
+  return elapsedJstCalendarDays(bornAt, at) + 1;
 }

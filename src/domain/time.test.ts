@@ -17,9 +17,12 @@ describe("Japanese calendar care rules", () => {
 });
 
 describe("growth", () => {
-  it("grows continuously without an upper limit", () => {
+  it("grows once per Japanese calendar day without an upper limit", () => {
     const born = new Date("2026-01-01T00:00:00Z");
     expect(sizeAt(born, born)).toBe(10);
+    expect(sizeAt(born, new Date("2026-01-01T14:59:59.999Z"))).toBe(10);
+    expect(sizeAt(born, new Date("2026-01-01T15:00:00.000Z"))).toBe(10.3);
+    expect(sizeAt(born, new Date("2026-01-02T14:59:59.999Z"))).toBe(10.3);
     expect(sizeAt(born, new Date("2026-01-11T00:00:00Z"))).toBe(13);
     expect(sizeAt(born, new Date("2126-01-01T00:00:00Z"))).toBeGreaterThan(
       10_000
@@ -27,8 +30,18 @@ describe("growth", () => {
   });
 
   it("counts the birth date as day one", () => {
-    const born = new Date("2026-01-01T00:00:00Z");
+    const born = new Date("2026-08-10T14:08:05.938Z");
     expect(ageDays(born, born)).toBe(1);
-    expect(ageDays(born, new Date("2026-01-02T00:00:00Z"))).toBe(2);
+    expect(ageDays(born, new Date("2026-08-10T14:59:59.999Z"))).toBe(1);
+    expect(ageDays(born, new Date("2026-08-10T15:00:00.000Z"))).toBe(2);
+  });
+
+  it("gives every marimo born on the same JST date the same daily size", () => {
+    const early = new Date("2026-08-10T03:00:00.000Z");
+    const late = new Date("2026-08-10T14:59:59.999Z");
+    const secondDay = new Date("2026-08-10T15:01:00.000Z");
+
+    expect(sizeAt(early, secondDay)).toBe(10.3);
+    expect(sizeAt(late, secondDay)).toBe(10.3);
   });
 });

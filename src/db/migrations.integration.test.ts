@@ -117,4 +117,78 @@ suite("database migration upgrade", () => {
       await admin.end();
     }
   });
+
+  it("recalculates stored sizes by Japanese calendar day", async () => {
+    const admin = new Pool({ connectionString: databaseUrl });
+    const schema = "marimo_calendar_growth_upgrade_test";
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`
+    });
+
+    try {
+      for (const migration of [
+        "001_initial.sql",
+        "002_watering_log_delivery.sql",
+        "003_xp_compensation.sql",
+        "004_watering_birth.sql",
+        "005_xp_delivery_fairness.sql"
+      ]) {
+        await pool.query(
+          await readFile(
+            resolve(process.cwd(), "migrations", migration),
+            "utf8"
+          )
+        );
+      }
+      const marimo = await pool.query<{ id: string }>(
+        `INSERT INTO marimos (
+           guild_id, user_id, generation, owner_display_name, name,
+           born_at, last_watered_at, last_watered_date,
+           died_at, final_size_mm, death_reason
+         ) VALUES ('1001', '2001', 1, 'owner', 'まりも',
+                   '2026-08-10T14:00:00Z', '2026-08-10T15:01:00Z', '2026-08-11',
+                   '2026-08-11T15:00:00Z', 10.31, 'missed-care')
+         RETURNING id`
+      );
+      const marimoId = marimo.rows[0]?.id;
+      if (marimoId === undefined) throw new Error("expected marimo row");
+      await pool.query(
+        `INSERT INTO marimo_waterings (
+           event_id, marimo_id, guild_id, user_id, channel_id,
+           watered_date, watered_at, size_mm, awarded_xp, is_birth
+         ) VALUES
+           ('00000000-0000-4000-8000-000000000011', $1, '1001', '2001', '3001',
+            '2026-08-10', '2026-08-10T14:00:00Z', 10.00, 100, TRUE),
+           ('00000000-0000-4000-8000-000000000012', $1, '1001', '2001', '3001',
+            '2026-08-11', '2026-08-10T15:01:00Z', 10.01, 100, FALSE)`,
+        [marimoId]
+      );
+
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "006_calendar_day_growth.sql"),
+          "utf8"
+        )
+      );
+
+      const waterings = await pool.query<{ size_mm: string }>(
+        "SELECT size_mm FROM marimo_waterings ORDER BY watered_at"
+      );
+      expect(waterings.rows.map((row) => Number(row.size_mm))).toEqual([
+        10, 10.3
+      ]);
+      const dead = await pool.query<{ final_size_mm: string }>(
+        "SELECT final_size_mm FROM marimos WHERE id = $1",
+        [marimoId]
+      );
+      expect(Number(dead.rows[0]?.final_size_mm)).toBe(10.6);
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
 });
