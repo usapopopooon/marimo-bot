@@ -20,6 +20,7 @@ import type { DeadMarimo, RankingEntry, Watering } from "../domain/types.js";
 export const WATER_BUTTON_ID = "marimo:water";
 export const STATUS_BUTTON_ID = "marimo:status";
 export const NAME_BUTTON_ID = "marimo:name";
+export const REVIVE_BUTTON_ID = "marimo:revive";
 export const NAME_MODAL_ID = "marimo:name-modal";
 export const NAME_INPUT_ID = "marimo:name-input";
 const MARIMO_GREEN = 0x20a51f;
@@ -52,7 +53,12 @@ export function waterPanel(waterXp: number): {
     new ButtonBuilder()
       .setCustomId(NAME_BUTTON_ID)
       .setLabel("名前をつける")
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(REVIVE_BUTTON_ID)
+      .setLabel("3,000 XPで復活")
+      .setEmoji("🌿")
+      .setStyle(ButtonStyle.Success)
   );
   return {
     content: "",
@@ -76,7 +82,8 @@ export function waterPanel(waterXp: number): {
             "",
             "⚠️ **水替えを忘れると…**",
             "丸一日忘れると枯れてしまいます。",
-            `次のまりもは **${waterXp} XP**から再スタートします。`
+            "枯れたまりもは **3,000 XP**で生き返らせることもできます。",
+            `新しく育て直す場合は **${waterXp} XP**から再スタートします。`
           ].join("\n")
         )
         .setFooter({ text: "日付は日本時間の0:00に切り替わります" })

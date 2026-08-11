@@ -26,6 +26,7 @@ for (const key of [
   "DISCORD_TOKEN",
   "WATER_XP",
   "XP_WEBHOOK_URL",
+  "XP_REVIVAL_URL",
   "XP_WEBHOOK_TOKEN",
   "LOG_LEVEL"
 ]) {

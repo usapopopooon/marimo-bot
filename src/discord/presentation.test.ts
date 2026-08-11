@@ -7,6 +7,7 @@ import {
   NAME_INPUT_ID,
   NAME_MODAL_ID,
   rankingPanel,
+  REVIVE_BUTTON_ID,
   statusContent,
   wateringLogContent,
   waterPanel,
@@ -53,11 +54,12 @@ describe("Discord presentation", () => {
         "",
         "⚠️ **水替えを忘れると…**",
         "丸一日忘れると枯れてしまいます。",
-        "次のまりもは **100 XP**から再スタートします。"
+        "枯れたまりもは **3,000 XP**で生き返らせることもできます。",
+        "新しく育て直す場合は **100 XP**から再スタートします。"
       ].join("\n")
     );
     expect(embed?.footer?.text).toBe("日付は日本時間の0:00に切り替わります");
-    expect(panel.components[0]?.components).toHaveLength(3);
+    expect(panel.components[0]?.components).toHaveLength(4);
     expect(
       panel.components[0]?.components.map((component) => component.toJSON())
     ).toContainEqual(expect.objectContaining({ custom_id: NAME_BUTTON_ID }));
@@ -67,6 +69,14 @@ describe("Discord presentation", () => {
       expect.objectContaining({
         custom_id: WATER_BUTTON_ID,
         label: "育て始める・水を替える"
+      })
+    );
+    expect(
+      panel.components[0]?.components.map((component) => component.toJSON())
+    ).toContainEqual(
+      expect.objectContaining({
+        custom_id: REVIVE_BUTTON_ID,
+        label: "3,000 XPで復活"
       })
     );
   });

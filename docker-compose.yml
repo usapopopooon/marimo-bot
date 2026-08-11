@@ -10,6 +10,7 @@ services:
       DISCORD_TOKEN:
       WATER_XP:
       XP_WEBHOOK_URL:
+      XP_REVIVAL_URL:
       XP_WEBHOOK_TOKEN:
       LOG_LEVEL:
     ports:
@@ -33,6 +34,7 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
       WATER_XP: "100"
       XP_WEBHOOK_URL: ${XP_WEBHOOK_URL:-}
+      XP_REVIVAL_URL: ${XP_REVIVAL_URL:-}
       XP_WEBHOOK_TOKEN: ${XP_WEBHOOK_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     restart: unless-stopped

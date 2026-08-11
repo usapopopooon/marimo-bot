@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ageDays, deathAt, isDead, jstDate, sizeAt } from "./time.js";
+import {
+  ageDays,
+  deathAt,
+  isDead,
+  jstDate,
+  revivedBornAt,
+  sizeAt
+} from "./time.js";
 
 describe("Japanese calendar care rules", () => {
   it("switches the care date at Japanese midnight", () => {
@@ -43,5 +50,16 @@ describe("growth", () => {
 
     expect(sizeAt(early, secondDay)).toBe(10.3);
     expect(sizeAt(late, secondDay)).toBe(10.3);
+  });
+
+  it("keeps age and size frozen while a dead marimo waits for revival", () => {
+    const born = new Date("2026-08-10T03:00:00Z");
+    const died = new Date("2026-08-11T15:00:00Z");
+    const revived = new Date("2026-08-14T03:00:00Z");
+    const resumedBorn = revivedBornAt(born, died, revived);
+
+    expect(jstDate(resumedBorn)).toBe("2026-08-12");
+    expect(ageDays(resumedBorn, revived)).toBe(ageDays(born, died));
+    expect(sizeAt(resumedBorn, revived)).toBe(sizeAt(born, died));
   });
 });

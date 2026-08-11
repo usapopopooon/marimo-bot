@@ -11,10 +11,12 @@ describe("environment config", () => {
     const config = loadConfig({
       ...required,
       XP_WEBHOOK_URL: "",
+      XP_REVIVAL_URL: "",
       XP_WEBHOOK_TOKEN: ""
     });
 
     expect(config.XP_WEBHOOK_URL).toBeUndefined();
+    expect(config.XP_REVIVAL_URL).toBeUndefined();
     expect(config.XP_WEBHOOK_TOKEN).toBeUndefined();
     expect(config.WATER_XP).toBe(100);
   });

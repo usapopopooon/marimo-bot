@@ -22,11 +22,15 @@ import type {
   GuildConfig,
   PanelKind,
   RankingEntry,
+  Revival,
   Watering
 } from "../domain/types.js";
 import { wateringXp } from "../domain/rewards.js";
 import { renderTankImage } from "../rendering/tank.js";
-import type { XpDelivery } from "../services/xp-delivery.js";
+import type {
+  RevivalSpendResult,
+  XpDelivery
+} from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
 import {
   deathLogContent,
@@ -36,6 +40,7 @@ import {
   NAME_INPUT_ID,
   NAME_MODAL_ID,
   rankingPanel,
+  REVIVE_BUTTON_ID,
   STATUS_BUTTON_ID,
   statusContent,
   WATER_BUTTON_ID,
@@ -229,7 +234,8 @@ export class MarimoBot {
         const isMarimoPanelButton = [
           WATER_BUTTON_ID,
           STATUS_BUTTON_ID,
-          NAME_BUTTON_ID
+          NAME_BUTTON_ID,
+          REVIVE_BUTTON_ID
         ].includes(interaction.customId);
         if (
           isMarimoPanelButton &&
@@ -247,6 +253,8 @@ export class MarimoBot {
           await this.handleButtonStatus(interaction);
         if (interaction.customId === NAME_BUTTON_ID)
           await this.handleNameButton(interaction);
+        if (interaction.customId === REVIVE_BUTTON_ID)
+          await this.handleRevive(interaction);
         return;
       }
       if (interaction.isModalSubmit()) {
@@ -345,6 +353,13 @@ export class MarimoBot {
       now,
       baseXp: this.config.WATER_XP
     });
+    if (result.status === "revival-pending") {
+      await interaction.editReply({
+        content:
+          "復活処理が途中です。「3,000 XPで復活」をもう一度押してください。XPは二重に消費されません。"
+      });
+      return;
+    }
     if (result.status === "already-watered") {
       await interaction.editReply({
         content: [
@@ -378,6 +393,116 @@ export class MarimoBot {
           : `先代は枯れてしまいました。第${result.watering.marimo.generation}世代が生まれました。`,
         `連続飼育 **${result.watering.ageDays}日**｜**${result.watering.sizeMm.toFixed(2)} mm**`,
         `本日 **+${result.watering.awardedXp} XP**｜明日は **${wateringXp(this.config.WATER_XP, result.watering.ageDays + 1)} XP**`
+      ].join("\n")
+    });
+  }
+
+  private async handleRevive(interaction: ButtonInteraction): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    if (!this.xpDelivery.revivalEnabled) {
+      await interaction.reply({
+        content: "現在、XPを使った復活は利用できません。",
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    const guildId = interaction.guildId;
+    const userId = interaction.user.id;
+    const now = new Date();
+    const preparation = await this.repository.prepareRevival({
+      guildId,
+      userId,
+      channelId: interaction.channelId,
+      now
+    });
+    if (preparation.status === "alive") {
+      await interaction.editReply({ content: "まりもは元気に生きています。" });
+      return;
+    }
+    if (preparation.status === "no-dead-marimo") {
+      await interaction.editReply({
+        content: "生き返らせられるまりもがいません。"
+      });
+      return;
+    }
+
+    if (preparation.newlyDied) {
+      await this.runBestEffort("Death log before revival", () =>
+        this.postDeathLog(preparation.death)
+      );
+      await this.runBestEffort("Ranking update before revival", () =>
+        this.updateRankings(guildId, now)
+      );
+    }
+
+    let spend: RevivalSpendResult;
+    try {
+      spend = await this.xpDelivery.spendRevival({
+        eventId: preparation.eventId,
+        guildId,
+        userId,
+        channelId: preparation.channelId,
+        observedAt: preparation.requestedAt
+      });
+    } catch (error) {
+      this.logger.warn(
+        { error: errorDetails(error), eventId: preparation.eventId },
+        "Revival XP request failed"
+      );
+      await interaction.editReply({
+        content:
+          "XPの確認が完了しませんでした。「3,000 XPで復活」をもう一度押してください。XPは二重に消費されません。"
+      });
+      return;
+    }
+    if (spend.status === "insufficient_xp") {
+      await this.repository.cancelRevival({
+        eventId: preparation.eventId,
+        guildId,
+        userId
+      });
+      await interaction.editReply({
+        content: `復活には **3,000 XP** 必要です。現在は **${spend.remainingXp.toLocaleString("ja-JP")} XP** です。`
+      });
+      return;
+    }
+
+    let revival: Revival;
+    try {
+      revival = await this.repository.completeRevival({
+        eventId: preparation.eventId,
+        guildId,
+        userId,
+        displayName: displayName(interaction),
+        now: new Date()
+      });
+    } catch (error) {
+      this.logger.error(
+        { error: errorDetails(error), eventId: preparation.eventId },
+        "Revival completion failed after XP charge"
+      );
+      await interaction.editReply({
+        content:
+          "XPの支払いは記録されていますが、復活の確定が途中です。もう一度押すと追加消費なしで再開します。"
+      });
+      return;
+    }
+    await this.runBestEffort("Ranking update after revival", () =>
+      this.updateRankings(guildId, new Date())
+    );
+    await interaction.editReply({
+      content: [
+        `🌿 **${displayMarimoName(revival.name)}** が生き返りました。`,
+        `第${revival.generation}世代｜飼育 **${revival.ageDays}日**｜**${revival.sizeMm.toFixed(2)} mm**`,
+        `**-${revival.costXp.toLocaleString("ja-JP")} XP**｜残り **${spend.remainingXp.toLocaleString("ja-JP")} XP**`
       ].join("\n")
     });
   }

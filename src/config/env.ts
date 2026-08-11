@@ -18,6 +18,7 @@ const schema = z.object({
   DATABASE_REQUIRE_SSL: booleanString,
   WATER_XP: z.coerce.number().int().min(1).max(1000).default(100),
   XP_WEBHOOK_URL: optionalEnvironmentValue(z.string().url()),
+  XP_REVIVAL_URL: optionalEnvironmentValue(z.string().url()),
   XP_WEBHOOK_TOKEN: optionalEnvironmentValue(z.string().min(1)),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])

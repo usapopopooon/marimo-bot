@@ -13,7 +13,7 @@ suite("MarimoRepository integration", () => {
   beforeAll(async () => {
     await runMigrations(pool);
     await pool.query(
-      "TRUNCATE marimo_allowed_roles, marimo_xp_awards, marimo_waterings, marimos, marimo_guild_configs RESTART IDENTITY CASCADE"
+      "TRUNCATE marimo_allowed_roles, marimo_revivals, marimo_xp_awards, marimo_waterings, marimos, marimo_guild_configs RESTART IDENTITY CASCADE"
     );
   });
 
@@ -332,5 +332,127 @@ suite("MarimoRepository integration", () => {
     expect(await repository.removeAllowedRole("1007", "5001")).toBe(true);
     expect(await repository.removeAllowedRole("1007", "5001")).toBe(false);
     expect(await repository.allowedRoleIds("1007")).toEqual(["5002"]);
+  });
+
+  it("prepares and completes an idempotent revival without growing while dead", async () => {
+    const input = {
+      guildId: "1008",
+      userId: "2009",
+      channelId: "3008",
+      displayName: "復活組",
+      baseXp: 100
+    };
+    const born = await repository.water({
+      ...input,
+      now: new Date("2026-08-10T03:00:00Z")
+    });
+    expect(born.status).toBe("watered");
+    const death = await repository.expireOne(
+      input.guildId,
+      input.userId,
+      new Date("2026-08-11T15:00:00Z")
+    );
+    expect(death?.finalSizeMm).toBe(10.6);
+
+    const first = await repository.prepareRevival({
+      guildId: input.guildId,
+      userId: input.userId,
+      channelId: input.channelId,
+      now: new Date("2026-08-14T03:00:00Z")
+    });
+    const retry = await repository.prepareRevival({
+      guildId: input.guildId,
+      userId: input.userId,
+      channelId: input.channelId,
+      now: new Date("2026-08-14T04:00:00Z")
+    });
+    expect(first.status).toBe("ready");
+    expect(retry.status).toBe("ready");
+    if (first.status !== "ready" || retry.status !== "ready")
+      throw new Error("expected revival preparation");
+    expect(retry.eventId).toBe(first.eventId);
+    expect(retry.requestedAt).toEqual(first.requestedAt);
+
+    const blockedWatering = await repository.water({
+      ...input,
+      now: new Date("2026-08-14T04:00:00Z")
+    });
+    expect(blockedWatering.status).toBe("revival-pending");
+
+    const revived = await repository.completeRevival({
+      eventId: first.eventId,
+      guildId: input.guildId,
+      userId: input.userId,
+      displayName: input.displayName,
+      now: new Date("2026-08-14T03:00:00Z")
+    });
+    expect(revived.generation).toBe(1);
+    expect(revived.name).toBe("復活組のまりも");
+    expect(revived.ageDays).toBe(3);
+    expect(revived.sizeMm).toBe(10.6);
+    expect(revived.costXp).toBe(3000);
+
+    const completedAgain = await repository.completeRevival({
+      eventId: first.eventId,
+      guildId: input.guildId,
+      userId: input.userId,
+      displayName: input.displayName,
+      now: new Date("2026-08-14T03:00:00Z")
+    });
+    expect(completedAgain.id).toBe(revived.id);
+    expect(completedAgain.sizeMm).toBe(10.6);
+
+    const sameDayWatering = await repository.water({
+      ...input,
+      now: new Date("2026-08-14T05:00:00Z")
+    });
+    expect(sameDayWatering.status).toBe("already-watered");
+    const history = await repository.deathLogHistory(
+      input.guildId,
+      new Date("2026-08-15T00:00:00Z")
+    );
+    expect(history).toHaveLength(1);
+    expect(history[0]?.generation).toBe(1);
+    expect(history[0]?.finalSizeMm).toBe(10.6);
+  });
+
+  it("cancels an unpaid revival so a new generation can start", async () => {
+    const input = {
+      guildId: "1009",
+      userId: "2010",
+      channelId: "3009",
+      displayName: "再出発",
+      baseXp: 100
+    };
+    await repository.water({
+      ...input,
+      now: new Date("2026-08-10T03:00:00Z")
+    });
+    await repository.expireOne(
+      input.guildId,
+      input.userId,
+      new Date("2026-08-11T15:00:00Z")
+    );
+    const preparation = await repository.prepareRevival({
+      guildId: input.guildId,
+      userId: input.userId,
+      channelId: input.channelId,
+      now: new Date("2026-08-12T03:00:00Z")
+    });
+    if (preparation.status !== "ready")
+      throw new Error("expected revival preparation");
+    await repository.cancelRevival({
+      eventId: preparation.eventId,
+      guildId: input.guildId,
+      userId: input.userId
+    });
+
+    const next = await repository.water({
+      ...input,
+      now: new Date("2026-08-12T03:00:00Z")
+    });
+    expect(next.status).toBe("watered");
+    if (next.status !== "watered") throw new Error("expected watering");
+    expect(next.watering.marimo.generation).toBe(2);
   });
 });

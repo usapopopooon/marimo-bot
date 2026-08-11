@@ -45,3 +45,24 @@ export function sizeAt(bornAt: Date, at: Date): number {
 export function ageDays(bornAt: Date, at: Date): number {
   return elapsedJstCalendarDays(bornAt, at) + 1;
 }
+
+export function revivedBornAt(
+  bornAt: Date,
+  diedAt: Date,
+  revivedAt: Date
+): Date {
+  const livedCalendarDays = ageDays(bornAt, diedAt) - 1;
+  const resumedBornDate = addCalendarDays(
+    jstDate(revivedAt),
+    -livedCalendarDays
+  );
+  const originalJst = new Date(bornAt.getTime() + JST_OFFSET_MS);
+  const millisecondsIntoDay =
+    originalJst.getUTCHours() * 60 * 60 * 1000 +
+    originalJst.getUTCMinutes() * 60 * 1000 +
+    originalJst.getUTCSeconds() * 1000 +
+    originalJst.getUTCMilliseconds();
+  return new Date(
+    startOfJstDate(resumedBornDate).getTime() + millisecondsIntoDay
+  );
+}

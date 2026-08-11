@@ -28,6 +28,7 @@ import {
 import {
   NAME_BUTTON_ID,
   NAME_MODAL_ID,
+  REVIVE_BUTTON_ID,
   STATUS_BUTTON_ID,
   WATER_BUTTON_ID
 } from "./presentation.js";
@@ -138,13 +139,16 @@ type PanelPoster = {
   ): Promise<void>;
 };
 
-function botWith(repository: Partial<MarimoRepository>): MarimoBot {
+function botWith(
+  repository: Partial<MarimoRepository>,
+  xpDelivery: Partial<XpDelivery> = {}
+): MarimoBot {
   return new MarimoBot(
     {
       allowedRoleIds: vi.fn().mockResolvedValue([]),
       ...repository
     } as MarimoRepository,
-    {} as XpDelivery,
+    xpDelivery as XpDelivery,
     config,
     pino({ level: "silent" })
   );
@@ -304,7 +308,8 @@ describe("panel interaction wiring", () => {
     for (const customId of [
       WATER_BUTTON_ID,
       STATUS_BUTTON_ID,
-      NAME_BUTTON_ID
+      NAME_BUTTON_ID,
+      REVIVE_BUTTON_ID
     ]) {
       const reply = vi.fn().mockResolvedValue(undefined);
       await dispatch(botWith(repository), {
@@ -458,6 +463,138 @@ describe("panel interaction wiring", () => {
         "連続飼育 **2日**｜**10.30 mm**",
         "本日 **+110 XP**｜明日は **120 XP**"
       ].join("\n")
+    });
+  });
+
+  it("charges 3,000 XP once and revives the same marimo generation", async () => {
+    const eventId = "00000000-0000-4000-8000-000000000099";
+    const requestedAt = new Date("2026-08-12T03:00:00Z");
+    const prepareRevival = vi.fn().mockResolvedValue({
+      status: "ready",
+      eventId,
+      channelId: "3001",
+      requestedAt,
+      death,
+      newlyDied: false
+    });
+    const completeRevival = vi.fn().mockResolvedValue({
+      ...living,
+      eventId,
+      costXp: 3000,
+      ageDays: 1,
+      sizeMm: 10.01
+    });
+    const spendRevival = vi.fn().mockResolvedValue({
+      status: "charged",
+      costXp: 3000,
+      remainingXp: 250,
+      duplicate: false
+    });
+    const bot = botWith(
+      {
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        prepareRevival,
+        completeRevival
+      },
+      { revivalEnabled: true, spendRevival }
+    );
+    (bot as unknown as WaterInteractionHarness).updateRankings = vi
+      .fn()
+      .mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: REVIVE_BUTTON_ID,
+      guildId: "1001",
+      channelId: "3001",
+      message: { id: "4001" },
+      user: { id: "2001", username: "owner", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
+
+    expect(spendRevival).toHaveBeenCalledWith({
+      eventId,
+      guildId: "1001",
+      userId: "2001",
+      channelId: "3001",
+      observedAt: requestedAt
+    });
+    expect(completeRevival).toHaveBeenCalledWith({
+      eventId,
+      guildId: "1001",
+      userId: "2001",
+      displayName: "owner",
+      now: expect.any(Date)
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: [
+        "🌿 **まりも** が生き返りました。",
+        "第1世代｜飼育 **1日**｜**10.01 mm**",
+        "**-3,000 XP**｜残り **250 XP**"
+      ].join("\n")
+    });
+  });
+
+  it("releases a pending revival when XP is insufficient", async () => {
+    const eventId = "00000000-0000-4000-8000-000000000098";
+    const cancelRevival = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith(
+      {
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        prepareRevival: vi.fn().mockResolvedValue({
+          status: "ready",
+          eventId,
+          channelId: "3001",
+          requestedAt: new Date("2026-08-12T03:00:00Z"),
+          death,
+          newlyDied: false
+        }),
+        cancelRevival
+      },
+      {
+        revivalEnabled: true,
+        spendRevival: vi.fn().mockResolvedValue({
+          status: "insufficient_xp",
+          costXp: 3000,
+          remainingXp: 2999,
+          duplicate: false
+        })
+      }
+    );
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: REVIVE_BUTTON_ID,
+      guildId: "1001",
+      channelId: "3001",
+      message: { id: "4001" },
+      user: { id: "2001", username: "owner", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
+
+    expect(cancelRevival).toHaveBeenCalledWith({
+      eventId,
+      guildId: "1001",
+      userId: "2001"
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: "復活には **3,000 XP** 必要です。現在は **2,999 XP** です。"
     });
   });
 

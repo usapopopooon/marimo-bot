@@ -37,7 +37,25 @@ export type WaterResult =
       sizeMm: number;
       ageDays: number;
     }
+  | { status: "revival-pending" }
   | { status: "watered"; watering: Watering; death?: DeadMarimo };
+
+export type RevivalPreparation =
+  | { status: "alive" }
+  | { status: "no-dead-marimo" }
+  | {
+      status: "ready";
+      eventId: string;
+      channelId: string;
+      requestedAt: Date;
+      death: DeadMarimo;
+      newlyDied: boolean;
+    };
+
+export type Revival = RankingEntry & {
+  eventId: string;
+  costXp: number;
+};
 
 export type RankingEntry = LivingMarimo & {
   sizeMm: number;

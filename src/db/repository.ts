@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 import { wateringXp } from "../domain/rewards.js";
-import { ageDays, deathAt, isDead, jstDate, sizeAt } from "../domain/time.js";
+import {
+  ageDays,
+  deathAt,
+  isDead,
+  jstDate,
+  revivedBornAt,
+  sizeAt
+} from "../domain/time.js";
 import type {
   DeadMarimo,
   GuildConfig,
@@ -9,6 +16,8 @@ import type {
   PanelKind,
   PendingWateringLog,
   RankingEntry,
+  Revival,
+  RevivalPreparation,
   Watering,
   WaterResult,
   XpAward
@@ -50,6 +59,16 @@ type WateringLogRow = MarimoRow & {
 type DeadMarimoRow = MarimoRow & {
   died_at: Date;
   final_size_mm: string | number;
+};
+
+type RevivalRow = DeadMarimoRow & {
+  event_id: string;
+  marimo_id: string;
+  channel_id: string;
+  cost_xp: number;
+  status: "pending" | "completed";
+  requested_at: Date;
+  revived_at: Date | null;
 };
 
 const panelColumns: Record<PanelKind, { channel: string; message: string }> = {
@@ -110,6 +129,14 @@ function wateringFromRow(row: WateringLogRow): Watering {
   };
 }
 
+function deadFromRow(row: DeadMarimoRow): DeadMarimo {
+  return {
+    ...livingFromRow(row),
+    diedAt: new Date(row.died_at),
+    finalSizeMm: Number(row.final_size_mm)
+  };
+}
+
 function firstRow<T>(rows: T[], context: string): T {
   const row = rows[0];
   if (row === undefined) throw new Error(`${context} returned no row`);
@@ -158,6 +185,13 @@ export class MarimoRepository {
         active = null;
       }
 
+      if (
+        active === null &&
+        (await this.hasPendingRevival(client, input.guildId, input.userId))
+      ) {
+        return { status: "revival-pending" };
+      }
+
       const today = jstDate(input.now);
       const existing = await client.query<{ exists: boolean }>(
         `SELECT EXISTS(
@@ -166,7 +200,10 @@ export class MarimoRepository {
          ) AS exists`,
         [input.guildId, input.userId, today]
       );
-      if (existing.rows[0]?.exists === true && active !== null) {
+      if (
+        active !== null &&
+        (existing.rows[0]?.exists === true || active.lastWateredDate === today)
+      ) {
         return {
           status: "already-watered",
           marimo: active,
@@ -258,6 +295,21 @@ export class MarimoRepository {
     );
     const row = result.rows[0];
     return row === undefined ? null : livingFromRow(row);
+  }
+
+  private async hasPendingRevival(
+    client: PoolClient,
+    guildId: string,
+    userId: string
+  ): Promise<boolean> {
+    const result = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM marimo_revivals
+         WHERE guild_id = $1 AND user_id = $2 AND status = 'pending'
+       ) AS exists`,
+      [guildId, userId]
+    );
+    return result.rows[0]?.exists === true;
   }
 
   private async createGeneration(
@@ -386,6 +438,195 @@ export class MarimoRepository {
       const active = await this.findLiving(client, guildId, userId);
       if (active === null || !isDead(active.lastWateredDate, now)) return null;
       return this.kill(client, active);
+    });
+  }
+
+  public async prepareRevival(input: {
+    guildId: string;
+    userId: string;
+    channelId: string;
+    now: Date;
+  }): Promise<RevivalPreparation> {
+    return this.transaction(async (client) => {
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`marimo:${input.guildId}:${input.userId}`]
+      );
+      const active = await this.findLiving(client, input.guildId, input.userId);
+      let newlyDied = false;
+      if (active !== null && !isDead(active.lastWateredDate, input.now)) {
+        return { status: "alive" };
+      }
+      if (active !== null) {
+        await this.kill(client, active);
+        newlyDied = true;
+      }
+
+      const deadResult = await client.query<DeadMarimoRow>(
+        `SELECT * FROM marimos
+         WHERE guild_id = $1 AND user_id = $2 AND died_at IS NOT NULL
+         ORDER BY generation DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [input.guildId, input.userId]
+      );
+      const deadRow = deadResult.rows[0];
+      if (deadRow === undefined) return { status: "no-dead-marimo" };
+      const death = deadFromRow(deadRow);
+
+      const pending = await client.query<RevivalRow>(
+        `SELECT *, marimo_id AS id FROM marimo_revivals
+         WHERE marimo_id = $1 AND status = 'pending'
+         FOR UPDATE`,
+        [death.id]
+      );
+      const existing = pending.rows[0];
+      if (existing !== undefined) {
+        return {
+          status: "ready",
+          eventId: existing.event_id,
+          channelId: existing.channel_id,
+          requestedAt: new Date(existing.requested_at),
+          death: deadFromRow(existing),
+          newlyDied
+        };
+      }
+
+      const eventId = randomUUID();
+      const inserted = await client.query<RevivalRow>(
+        `INSERT INTO marimo_revivals (
+           event_id, marimo_id, guild_id, user_id, channel_id,
+           generation, owner_display_name, name, born_at,
+           last_watered_at, last_watered_date, died_at, final_size_mm,
+           requested_at
+         ) VALUES (
+           $1, $2, $3, $4, $5,
+           $6, $7, $8, $9,
+           $10, $11, $12, $13, $14
+         )
+         RETURNING *, marimo_id AS id`,
+        [
+          eventId,
+          death.id,
+          input.guildId,
+          input.userId,
+          input.channelId,
+          death.generation,
+          death.ownerDisplayName,
+          death.name,
+          death.bornAt,
+          death.lastWateredAt,
+          death.lastWateredDate,
+          death.diedAt,
+          death.finalSizeMm,
+          input.now
+        ]
+      );
+      const row = firstRow(inserted.rows, "revival insert");
+      return {
+        status: "ready",
+        eventId: row.event_id,
+        channelId: row.channel_id,
+        requestedAt: new Date(row.requested_at),
+        death: deadFromRow(row),
+        newlyDied
+      };
+    });
+  }
+
+  public async cancelRevival(input: {
+    eventId: string;
+    guildId: string;
+    userId: string;
+  }): Promise<void> {
+    await this.transaction(async (client) => {
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`marimo:${input.guildId}:${input.userId}`]
+      );
+      await client.query(
+        `DELETE FROM marimo_revivals
+         WHERE event_id = $1 AND guild_id = $2 AND user_id = $3
+           AND status = 'pending'`,
+        [input.eventId, input.guildId, input.userId]
+      );
+    });
+  }
+
+  public async completeRevival(input: {
+    eventId: string;
+    guildId: string;
+    userId: string;
+    displayName: string;
+    now: Date;
+  }): Promise<Revival> {
+    return this.transaction(async (client) => {
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`marimo:${input.guildId}:${input.userId}`]
+      );
+      const revivalResult = await client.query<RevivalRow>(
+        `SELECT *, marimo_id AS id FROM marimo_revivals
+         WHERE event_id = $1 AND guild_id = $2 AND user_id = $3
+         FOR UPDATE`,
+        [input.eventId, input.guildId, input.userId]
+      );
+      const revival = firstRow(revivalResult.rows, "revival lookup");
+      let marimo: LivingMarimo;
+      if (revival.status === "completed") {
+        const current = await this.findLiving(
+          client,
+          input.guildId,
+          input.userId
+        );
+        if (current === null)
+          throw new Error("completed revival has no living marimo");
+        marimo = current;
+      } else {
+        const resumedBornAt = revivedBornAt(
+          new Date(revival.born_at),
+          new Date(revival.died_at),
+          input.now
+        );
+        const updated = await client.query<MarimoRow>(
+          `UPDATE marimos
+           SET owner_display_name = $4,
+               born_at = $8,
+               last_watered_at = $5,
+               last_watered_date = $6,
+               died_at = NULL,
+               final_size_mm = NULL,
+               death_reason = NULL,
+               updated_at = NOW()
+           WHERE id = $1 AND guild_id = $2 AND user_id = $3
+             AND died_at = $7
+           RETURNING *`,
+          [
+            revival.marimo_id,
+            input.guildId,
+            input.userId,
+            input.displayName,
+            input.now,
+            jstDate(input.now),
+            revival.died_at,
+            resumedBornAt
+          ]
+        );
+        marimo = livingFromRow(firstRow(updated.rows, "marimo revival"));
+        await client.query(
+          `UPDATE marimo_revivals
+           SET status = 'completed', revived_at = $2, updated_at = NOW()
+           WHERE event_id = $1`,
+          [input.eventId, input.now]
+        );
+      }
+      return {
+        ...marimo,
+        eventId: input.eventId,
+        costXp: revival.cost_xp,
+        sizeMm: sizeAt(marimo.bornAt, input.now),
+        ageDays: ageDays(marimo.bornAt, input.now)
+      };
     });
   }
 
@@ -528,17 +769,29 @@ export class MarimoRepository {
     guildId: string,
     through: Date
   ): Promise<DeadMarimo[]> {
-    const result = await this.pool.query<DeadMarimoRow>(
-      `SELECT * FROM marimos
+    const current = await this.pool.query<DeadMarimoRow>(
+      `SELECT * FROM marimos AS marimo
        WHERE guild_id = $1 AND died_at IS NOT NULL AND died_at <= $2
-       ORDER BY died_at ASC, id ASC`,
+         AND NOT EXISTS (
+           SELECT 1 FROM marimo_revivals AS revival
+           WHERE revival.marimo_id = marimo.id
+             AND revival.status = 'completed'
+             AND revival.died_at = marimo.died_at
+         )`,
       [guildId, through]
     );
-    return result.rows.map((row) => ({
-      ...livingFromRow(row),
-      diedAt: new Date(row.died_at),
-      finalSizeMm: Number(row.final_size_mm)
-    }));
+    const revived = await this.pool.query<RevivalRow>(
+      `SELECT *, marimo_id AS id FROM marimo_revivals
+       WHERE guild_id = $1 AND status = 'completed' AND died_at <= $2`,
+      [guildId, through]
+    );
+    return [...current.rows, ...revived.rows]
+      .map(deadFromRow)
+      .sort(
+        (left, right) =>
+          left.diedAt.getTime() - right.diedAt.getTime() ||
+          left.id.localeCompare(right.id)
+      );
   }
 
   public async markWateringLogDelivered(eventId: string): Promise<void> {

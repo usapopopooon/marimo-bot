@@ -8,6 +8,13 @@ export type XpRepository = Pick<
   "pendingXp" | "markXpDelivered" | "markXpFailed"
 >;
 
+export type RevivalSpendResult = {
+  status: "charged" | "insufficient_xp";
+  costXp: number;
+  remainingXp: number;
+  duplicate: boolean;
+};
+
 export class XpDelivery {
   private readonly inFlight = new Set<string>();
 
@@ -19,6 +26,76 @@ export class XpDelivery {
 
   public get enabled(): boolean {
     return this.config.XP_WEBHOOK_URL !== undefined;
+  }
+
+  public get revivalEnabled(): boolean {
+    return this.revivalUrl() !== undefined;
+  }
+
+  private revivalUrl(): string | undefined {
+    if (this.config.XP_REVIVAL_URL !== undefined)
+      return this.config.XP_REVIVAL_URL;
+    if (this.config.XP_WEBHOOK_URL === undefined) return undefined;
+    const url = new URL(this.config.XP_WEBHOOK_URL);
+    if (!url.pathname.endsWith("/watering-events")) return undefined;
+    url.pathname = url.pathname.replace(
+      /\/watering-events$/,
+      "/revival-spends"
+    );
+    return url.toString();
+  }
+
+  public async spendRevival(input: {
+    eventId: string;
+    guildId: string;
+    userId: string;
+    channelId: string;
+    observedAt: Date;
+  }): Promise<RevivalSpendResult> {
+    const url = this.revivalUrl();
+    if (url === undefined)
+      throw new Error("XP revival integration is disabled");
+    const headers: Record<string, string> = {
+      "content-type": "application/json"
+    };
+    if (this.config.XP_WEBHOOK_TOKEN !== undefined) {
+      headers.authorization = `Bearer ${this.config.XP_WEBHOOK_TOKEN}`;
+    }
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        event_id: input.eventId,
+        guild_id: input.guildId,
+        user_id: input.userId,
+        channel_id: input.channelId,
+        observed_at: input.observedAt.toISOString()
+      }),
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok)
+      throw new Error(`XP revival API returned HTTP ${response.status}`);
+    const body: unknown = await response.json();
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("status" in body) ||
+      (body.status !== "charged" && body.status !== "insufficient_xp") ||
+      !("cost_xp" in body) ||
+      typeof body.cost_xp !== "number" ||
+      !("remaining_xp" in body) ||
+      typeof body.remaining_xp !== "number" ||
+      !("duplicate" in body) ||
+      typeof body.duplicate !== "boolean"
+    ) {
+      throw new Error("XP revival API returned an invalid response");
+    }
+    return {
+      status: body.status,
+      costXp: body.cost_xp,
+      remainingXp: body.remaining_xp,
+      duplicate: body.duplicate
+    };
   }
 
   public async deliverPending(): Promise<void> {
