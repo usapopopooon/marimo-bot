@@ -37,13 +37,25 @@ describe("Discord presentation", () => {
     expect(panel.flags).toEqual([]);
     expect(panel.embeds).toHaveLength(1);
     expect(embed?.title).toBe("🟢 まりもちゃん");
-    expect(embed?.description).toContain("自分のまりもが生まれ、**100 XP**");
-    expect(embed?.description).toContain("1日1回");
-    expect(embed?.description).toContain("100 XP");
-    expect(embed?.description).toContain("+10 XP");
-    expect(embed?.description).toContain("最大 **500 XP**");
-    expect(embed?.description).toContain("100 XP**から再スタート");
-    expect(embed?.description).toContain("枯れてしまい");
+    expect(embed?.description).toBe(
+      [
+        "🌱 **まりもを育てよう**",
+        "下のボタンを押すと、自分のまりもが生まれます。",
+        "まりもは時間とともに、どこまでも大きくなります。",
+        "",
+        "🫧 **お世話は1日1回**",
+        "毎日水を替えて、まりもを育てましょう。",
+        "",
+        "✨ **もらえるXP**",
+        "・育て始めた日：**100 XP**",
+        "・連続飼育：1日ごとに **+10 XP**",
+        "・最大：**500 XP**",
+        "",
+        "⚠️ **水替えを忘れると…**",
+        "丸一日忘れると枯れてしまいます。",
+        "次のまりもは **100 XP**から再スタートします。"
+      ].join("\n")
+    );
     expect(embed?.footer?.text).toBe("日付は日本時間の0:00に切り替わります");
     expect(panel.components[0]?.components).toHaveLength(3);
     expect(
