@@ -26,7 +26,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-10T03:00:00Z"),
-      awardedXp: 100
+      baseXp: 100
     });
     const duplicate = await repository.water({
       guildId: "1001",
@@ -34,7 +34,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-10T08:00:00Z"),
-      awardedXp: 100
+      baseXp: 100
     });
     const continued = await repository.water({
       guildId: "1001",
@@ -42,7 +42,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-11T03:00:00Z"),
-      awardedXp: 100
+      baseXp: 100
     });
     const nextGeneration = await repository.water({
       guildId: "1001",
@@ -50,7 +50,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3001",
       displayName: "客",
       now: new Date("2026-08-12T15:00:00Z"),
-      awardedXp: 100
+      baseXp: 100
     });
 
     expect(first.status).toBe("watered");
@@ -69,7 +69,7 @@ suite("MarimoRepository integration", () => {
 
     const awards = await repository.pendingXp();
     expect(awards).toHaveLength(3);
-    expect(awards.map((award) => award.awardedXp)).toEqual([100, 100, 100]);
+    expect(awards.map((award) => award.awardedXp)).toEqual([100, 110, 100]);
 
     const rankings = await repository.rankings(
       "1001",
@@ -87,6 +87,9 @@ suite("MarimoRepository integration", () => {
       false,
       true
     ]);
+    expect(pendingLogs.map((watering) => watering.awardedXp)).toEqual([
+      100, 110, 100
+    ]);
     const fullWateringHistory = await repository.wateringLogHistory(
       "1001",
       new Date("2026-08-13T00:00:00Z")
@@ -95,6 +98,9 @@ suite("MarimoRepository integration", () => {
       first.watering.eventId,
       continued.watering.eventId,
       nextGeneration.watering.eventId
+    ]);
+    expect(fullWateringHistory.map((event) => event.awardedXp)).toEqual([
+      100, 110, 100
     ]);
     expect(
       await repository.wateringLogHistory(
@@ -148,7 +154,7 @@ suite("MarimoRepository integration", () => {
       userId: "2002",
       channelId: "3002",
       displayName: "境界",
-      awardedXp: 100
+      baseXp: 100
     };
     await repository.water({
       ...input,
@@ -194,7 +200,7 @@ suite("MarimoRepository integration", () => {
       guildId: "1006",
       channelId: "3006",
       displayName: "同日組",
-      awardedXp: 100
+      baseXp: 100
     };
     await repository.water({
       ...input,
@@ -226,6 +232,44 @@ suite("MarimoRepository integration", () => {
     ]);
   });
 
+  it("caps long-running care at 500 XP in logs and the XP outbox", async () => {
+    const awarded: number[] = [];
+    const eventIds: string[] = [];
+    for (let day = 0; day < 42; day += 1) {
+      const result = await repository.water({
+        guildId: "1007",
+        userId: "2008",
+        channelId: "3007",
+        displayName: "長期飼育",
+        now: new Date(Date.UTC(2026, 7, 1 + day, 3)),
+        baseXp: 100
+      });
+      if (result.status !== "watered") throw new Error("expected watering");
+      awarded.push(result.watering.awardedXp);
+      eventIds.push(result.watering.eventId);
+    }
+
+    expect([
+      awarded[0],
+      awarded[1],
+      awarded[39],
+      awarded[40],
+      awarded[41]
+    ]).toEqual([100, 110, 490, 500, 500]);
+    const logAwards = (await repository.pendingWateringLogs(100))
+      .filter((watering) => watering.marimo.guildId === "1007")
+      .map((watering) => watering.awardedXp);
+    const outboxAwards = (await repository.pendingXp(100))
+      .filter((award) => award.guildId === "1007")
+      .map((award) => award.awardedXp);
+    expect(logAwards).toEqual(awarded);
+    expect(outboxAwards).toEqual(awarded);
+    for (const eventId of eventIds) {
+      await repository.markWateringLogDelivered(eventId);
+      await repository.markXpDelivered(eventId);
+    }
+  });
+
   it("grants the XP difference once for both delivered and uncertain old awards", async () => {
     const delivered = await repository.water({
       guildId: "1004",
@@ -233,7 +277,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3004",
       displayName: "配信済み",
       now: new Date("2026-08-10T03:00:00Z"),
-      awardedXp: 10
+      baseXp: 10
     });
     if (delivered.status !== "watered") throw new Error("expected watering");
     await repository.markXpDelivered(delivered.watering.eventId);
@@ -243,7 +287,7 @@ suite("MarimoRepository integration", () => {
       channelId: "3005",
       displayName: "配信不明",
       now: new Date("2026-08-10T03:00:00Z"),
-      awardedXp: 10
+      baseXp: 10
     });
     if (uncertain.status !== "watered") throw new Error("expected watering");
     await repository.markXpFailed(uncertain.watering.eventId, "timeout");

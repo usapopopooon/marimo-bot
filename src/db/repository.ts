@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
+import { wateringXp } from "../domain/rewards.js";
 import { ageDays, deathAt, isDead, jstDate, sizeAt } from "../domain/time.js";
 import type {
   DeadMarimo,
@@ -141,7 +142,7 @@ export class MarimoRepository {
     channelId: string;
     displayName: string;
     now: Date;
-    awardedXp: number;
+    baseXp: number;
   }): Promise<WaterResult> {
     return this.transaction(async (client) => {
       const lockKey = `marimo:${input.guildId}:${input.userId}`;
@@ -191,6 +192,8 @@ export class MarimoRepository {
 
       const eventId = randomUUID();
       const currentSize = sizeAt(active.bornAt, input.now);
+      const currentAgeDays = ageDays(active.bornAt, input.now);
+      const awardedXp = wateringXp(input.baseXp, currentAgeDays);
       await client.query(
         `INSERT INTO marimo_waterings (
            event_id, marimo_id, guild_id, user_id, channel_id,
@@ -206,7 +209,7 @@ export class MarimoRepository {
           today,
           input.now,
           currentSize,
-          input.awardedXp,
+          awardedXp,
           isBirth
         ]
       );
@@ -220,7 +223,7 @@ export class MarimoRepository {
           input.guildId,
           input.userId,
           input.channelId,
-          input.awardedXp,
+          awardedXp,
           input.now
         ]
       );
@@ -233,8 +236,8 @@ export class MarimoRepository {
           wateredAt: input.now,
           wateredDate: today,
           sizeMm: currentSize,
-          ageDays: ageDays(active.bornAt, input.now),
-          awardedXp: input.awardedXp,
+          ageDays: currentAgeDays,
+          awardedXp,
           isBirth
         },
         ...(death === undefined ? {} : { death })

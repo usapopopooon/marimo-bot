@@ -24,6 +24,7 @@ import type {
   RankingEntry,
   Watering
 } from "../domain/types.js";
+import { wateringXp } from "../domain/rewards.js";
 import { renderTankImage } from "../rendering/tank.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
@@ -342,13 +343,14 @@ export class MarimoBot {
       channelId: interaction.channelId,
       displayName: displayName(interaction),
       now,
-      awardedXp: this.config.WATER_XP
+      baseXp: this.config.WATER_XP
     });
     if (result.status === "already-watered") {
       await interaction.editReply({
         content: [
           "今日はもう水を替えています。",
-          `**${displayMarimoName(result.marimo.name)}**｜生後${result.ageDays}日｜${result.sizeMm.toFixed(2)} mm`
+          `**${displayMarimoName(result.marimo.name)}**｜連続飼育${result.ageDays}日｜${result.sizeMm.toFixed(2)} mm`,
+          `明日は **${wateringXp(this.config.WATER_XP, result.ageDays + 1)} XP**`
         ].join("\n")
       });
       return;
@@ -374,8 +376,8 @@ export class MarimoBot {
             ? `**${displayMarimoName(result.watering.marimo.name)}** が生まれました。`
             : "水がきれいになりました。"
           : `先代は枯れてしまいました。第${result.watering.marimo.generation}世代が生まれました。`,
-        `生後 **${result.watering.ageDays}日**｜**${result.watering.sizeMm.toFixed(2)} mm**`,
-        `**+${result.watering.awardedXp} XP**`
+        `連続飼育 **${result.watering.ageDays}日**｜**${result.watering.sizeMm.toFixed(2)} mm**`,
+        `本日 **+${result.watering.awardedXp} XP**｜明日は **${wateringXp(this.config.WATER_XP, result.watering.ageDays + 1)} XP**`
       ].join("\n")
     });
   }
@@ -390,16 +392,17 @@ export class MarimoBot {
       });
       return;
     }
+    const now = new Date();
     const entry = await this.repository.getLiving(
       interaction.guildId,
       interaction.user.id,
-      new Date()
+      now
     );
     await interaction.reply({
       content:
         entry === null
           ? "生きているまりもはいません。「育て始める・水を替える」から始めましょう。"
-          : statusContent(entry),
+          : statusContent(entry, this.config.WATER_XP, now),
       ephemeral: true
     });
   }

@@ -7,6 +7,7 @@ import {
   NAME_INPUT_ID,
   NAME_MODAL_ID,
   rankingPanel,
+  statusContent,
   wateringLogContent,
   waterPanel,
   WATER_BUTTON_ID
@@ -39,6 +40,9 @@ describe("Discord presentation", () => {
     expect(embed?.description).toContain("自分のまりもが生まれ、**100 XP**");
     expect(embed?.description).toContain("1日1回");
     expect(embed?.description).toContain("100 XP");
+    expect(embed?.description).toContain("+10 XP");
+    expect(embed?.description).toContain("最大 **500 XP**");
+    expect(embed?.description).toContain("100 XP**から再スタート");
     expect(embed?.description).toContain("枯れてしまい");
     expect(embed?.footer?.text).toBe("日付は日本時間の0:00に切り替わります");
     expect(panel.components[0]?.components).toHaveLength(3);
@@ -111,6 +115,19 @@ describe("Discord presentation", () => {
     expect(ranking).not.toContain("https://");
   });
 
+  it("includes every participant when more than ten marimos are alive", () => {
+    const entries = Array.from({ length: 11 }, (_, index) =>
+      entry(`owner-${index + 1}`, 1, 10)
+    );
+    const ranking = rankingPanel(entries, new Date("2026-08-10T00:00:00Z"))
+      .embeds[0]?.data.description;
+
+    expect(ranking).toContain("<@owner-1>");
+    expect(ranking).toContain("<@owner-10>");
+    expect(ranking).toContain("<@owner-11>");
+    expect(ranking?.match(/<@owner-/g)).toHaveLength(11);
+  });
+
   it("announces a first interaction as a birth, not a water change", () => {
     const marimo = entry("new-owner", 1, 10);
     const base = {
@@ -148,6 +165,18 @@ describe("Discord presentation", () => {
 
     expect(memorial).toContain("<@owner>");
     expect(memorial).not.toContain("https://");
+  });
+
+  it("shows the next increasing XP reward in personal status", () => {
+    const marimo = {
+      ...entry("owner", 2, 10.3),
+      lastWateredDate: "2026-08-11"
+    };
+
+    const status = statusContent(marimo, 100, new Date("2026-08-11T03:00:00Z"));
+
+    expect(status).toContain("連続飼育 **2日**");
+    expect(status).toContain("次の水替え **120 XP**");
   });
 
   it("escapes formatting characters in user-defined marimo names", () => {

@@ -9,6 +9,12 @@ import {
   TextInputBuilder,
   TextInputStyle
 } from "discord.js";
+import {
+  DAILY_WATER_XP_INCREMENT,
+  MAX_WATER_XP,
+  wateringXp
+} from "../domain/rewards.js";
+import { jstDate } from "../domain/time.js";
 import type { DeadMarimo, RankingEntry, Watering } from "../domain/types.js";
 
 export const WATER_BUTTON_ID = "marimo:water";
@@ -32,6 +38,7 @@ export function waterPanel(waterXp: number): {
   components: ActionRowBuilder<ButtonBuilder>[];
   flags: [];
 } {
+  const maximumXp = Math.max(waterXp, MAX_WATER_XP);
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(WATER_BUTTON_ID)
@@ -57,7 +64,8 @@ export function waterPanel(waterXp: number): {
           [
             "まりもは時間とともに、どこまでも大きくなります。",
             `初回は自分のまりもが生まれ、**${waterXp} XP**を獲得します。`,
-            `以後も1日1回水を替えると **${waterXp} XP**。丸一日忘れると枯れてしまい、次の世代へリセットされます。`
+            `以後は1日1回の水替えで、連続飼育1日ごとに **+${DAILY_WATER_XP_INCREMENT} XP**（最大 **${maximumXp} XP**）。`,
+            `丸一日忘れると枯れてしまい、次の世代では **${waterXp} XP**から再スタートします。`
           ].join("\n")
         )
         .setFooter({ text: "日付は日本時間の0:00に切り替わります" })
@@ -92,9 +100,7 @@ export function rankingPanel(
   entries: RankingEntry[],
   updatedAt: Date
 ): { content: string; embeds: EmbedBuilder[]; components: []; flags: [] } {
-  const sorted = [...entries]
-    .sort((left, right) => right.sizeMm - left.sizeMm)
-    .slice(0, 10);
+  const sorted = [...entries].sort((left, right) => right.sizeMm - left.sizeMm);
   let rank = 0;
   let previousSize: string | undefined;
   const lines = sorted.map((entry, index) => {
@@ -121,12 +127,19 @@ export function rankingPanel(
   };
 }
 
-export function statusContent(entry: RankingEntry): string {
+export function statusContent(
+  entry: RankingEntry,
+  baseXp: number,
+  now: Date
+): string {
+  const nextCareDay =
+    entry.lastWateredDate === jstDate(now) ? entry.ageDays + 1 : entry.ageDays;
   return [
     `# 🟢 ${displayMarimoName(entry.name)}`,
-    `第${entry.generation}世代｜生後 **${entry.ageDays}日**`,
+    `第${entry.generation}世代｜連続飼育 **${entry.ageDays}日**`,
     `大きさ **${entry.sizeMm.toFixed(2)} mm**`,
     `最後の水替え **${entry.lastWateredDate}**`,
+    `次の水替え **${wateringXp(baseXp, nextCareDay)} XP**`,
     "",
     "-# 水を替えない日が丸一日続くと枯れてしまいます"
   ].join("\n");

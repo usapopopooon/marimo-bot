@@ -108,6 +108,12 @@ type WateringLogDeliverer = {
   postWateringLog(watering: Watering): Promise<void>;
 };
 
+type WaterInteractionHarness = {
+  deliverWateringLog(watering: Watering): Promise<void>;
+  updateRankings(guildId: string, now: Date): Promise<void>;
+  runInBackground(operation: string, task: () => Promise<void>): void;
+};
+
 type LogRefresher = {
   client: { user: { id: string } | null };
   repostAllLogs(interaction: ChatInputCommandInteraction): Promise<void>;
@@ -397,6 +403,62 @@ describe("panel interaction wiring", () => {
     });
     expect(getLiving).not.toHaveBeenCalled();
     expect(showModal).not.toHaveBeenCalled();
+  });
+
+  it("passes the base XP to daily care and shows the increasing reward", async () => {
+    const secondDayWatering: Watering = {
+      ...watering,
+      ageDays: 2,
+      sizeMm: 10.3,
+      awardedXp: 110,
+      isBirth: false
+    };
+    const water = vi.fn().mockResolvedValue({
+      status: "watered",
+      watering: secondDayWatering
+    });
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue({
+        ...guildConfig,
+        waterPanelChannelId: "3001",
+        waterPanelMessageId: "4001"
+      }),
+      water
+    });
+    const harness = bot as unknown as WaterInteractionHarness;
+    harness.deliverWateringLog = vi.fn().mockResolvedValue(undefined);
+    harness.updateRankings = vi.fn().mockResolvedValue(undefined);
+    harness.runInBackground = vi.fn();
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: WATER_BUTTON_ID,
+      guildId: "1001",
+      channelId: "3001",
+      message: { id: "4001" },
+      user: { id: "2001", username: "owner", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
+
+    expect(water).toHaveBeenCalledWith({
+      guildId: "1001",
+      userId: "2001",
+      channelId: "3001",
+      displayName: "owner",
+      now: expect.any(Date),
+      baseXp: 100
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: [
+        "水がきれいになりました。",
+        "連続飼育 **2日**｜**10.30 mm**",
+        "本日 **+110 XP**｜明日は **120 XP**"
+      ].join("\n")
+    });
   });
 
   it("asks the user to start raising before opening the name modal", async () => {
