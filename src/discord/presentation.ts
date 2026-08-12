@@ -151,6 +151,43 @@ export function rankingPanel(
   };
 }
 
+function deadLeaderboardLine(entry: DeadMarimo, rank: number): string {
+  return `**${rank}位**｜${ownerMention(entry.userId)}｜**${entry.finalSizeMm.toFixed(2)} mm**｜第${entry.generation}世代｜${displayMarimoName(entry.name)}`;
+}
+
+export function deadRankingPanel(
+  entries: DeadMarimo[],
+  updatedAt: Date
+): { content: string; embeds: EmbedBuilder[]; components: []; flags: [] } {
+  const sorted = [...entries].sort(
+    (left, right) => right.finalSizeMm - left.finalSizeMm
+  );
+  let rank = 0;
+  let previousSize: string | undefined;
+  const lines = sorted.map((entry, index) => {
+    const displayedSize = entry.finalSizeMm.toFixed(2);
+    if (displayedSize !== previousSize) rank = index + 1;
+    previousSize = displayedSize;
+    return deadLeaderboardLine(entry, rank);
+  });
+  const description = [
+    lines.length === 0 ? "まだ枯れたまりもはいません。" : lines.join("\n"),
+    "",
+    `-# 最終更新 <t:${Math.floor(updatedAt.getTime() / 1000)}:R>`
+  ].join("\n");
+  return {
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x766b5e)
+        .setTitle("🥀 枯れたまりも大きさランキング")
+        .setDescription(description)
+    ],
+    components: [],
+    flags: []
+  };
+}
+
 export function statusContent(
   entry: RankingEntry,
   baseXp: number,

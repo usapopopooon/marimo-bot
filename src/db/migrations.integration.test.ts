@@ -8,6 +8,76 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl === undefined ? describe.skip : describe;
 
 suite("database migration upgrade", () => {
+  it("adds an independent dead ranking panel without changing existing panels", async () => {
+    const admin = new Pool({ connectionString: databaseUrl });
+    const schema = "marimo_dead_panel_upgrade_test";
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`
+    });
+
+    try {
+      for (const migration of [
+        "001_initial.sql",
+        "002_watering_log_delivery.sql",
+        "003_xp_compensation.sql",
+        "004_watering_birth.sql",
+        "005_xp_delivery_fairness.sql",
+        "006_calendar_day_growth.sql",
+        "007_allowed_roles.sql",
+        "008_marimo_revival.sql",
+        "009_lower_revival_cost.sql",
+        "010_watering_dialogue.sql"
+      ]) {
+        await pool.query(
+          await readFile(
+            resolve(process.cwd(), "migrations", migration),
+            "utf8"
+          )
+        );
+      }
+      await pool.query(
+        `INSERT INTO marimo_guild_configs (
+           guild_id, water_panel_channel_id, water_panel_message_id,
+           size_panel_channel_id, size_panel_message_id
+         ) VALUES ('1001', '3001', '4001', '3002', '4002')`
+      );
+
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "011_dead_ranking_panel.sql"),
+          "utf8"
+        )
+      );
+
+      const repository = new MarimoRepository(pool);
+      expect(await repository.getConfig("1001")).toMatchObject({
+        waterPanelChannelId: "3001",
+        waterPanelMessageId: "4001",
+        sizePanelChannelId: "3002",
+        sizePanelMessageId: "4002",
+        deadPanelChannelId: null,
+        deadPanelMessageId: null
+      });
+
+      await repository.setPanel("1001", "dead", "3003", "4003");
+      expect(await repository.getConfig("1001")).toMatchObject({
+        waterPanelChannelId: "3001",
+        waterPanelMessageId: "4001",
+        sizePanelChannelId: "3002",
+        sizePanelMessageId: "4002",
+        deadPanelChannelId: "3003",
+        deadPanelMessageId: "4003"
+      });
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
   it("keeps historical watering logs without retroactive dialogue", async () => {
     const admin = new Pool({ connectionString: databaseUrl });
     const schema = "marimo_dialogue_upgrade_test";

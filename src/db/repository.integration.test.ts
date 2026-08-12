@@ -105,6 +105,13 @@ suite("MarimoRepository integration", () => {
     );
     expect(rankings).toHaveLength(1);
     expect(rankings[0]?.generation).toBe(2);
+    const deadRankings = await repository.deadRankings("1001");
+    expect(deadRankings).toHaveLength(1);
+    expect(deadRankings[0]).toMatchObject({
+      userId: "2001",
+      generation: 1,
+      finalSizeMm: 10.9
+    });
 
     const pendingLogs = (await repository.pendingWateringLogs()).filter(
       (watering) => watering.marimo.guildId === "1001"
@@ -391,6 +398,7 @@ suite("MarimoRepository integration", () => {
       new Date("2026-08-11T15:00:00Z")
     );
     expect(death?.finalSizeMm).toBe(10.6);
+    expect(await repository.deadRankings(input.guildId)).toEqual([death]);
 
     const first = await repository.prepareRevival({
       guildId: input.guildId,
@@ -434,6 +442,7 @@ suite("MarimoRepository integration", () => {
     expect(revived.ageDays).toBe(3);
     expect(revived.sizeMm).toBe(10.6);
     expect(revived.costXp).toBe(1000);
+    expect(await repository.deadRankings(input.guildId)).toEqual([]);
 
     const completedAgain = await repository.completeRevival({
       eventId: first.eventId,

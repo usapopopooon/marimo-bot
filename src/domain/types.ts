@@ -67,7 +67,7 @@ export type PersonalMarimoStatus = RankingEntry & {
   dialogueId: string | null;
 };
 
-export type PanelKind = "water" | "size";
+export type PanelKind = "water" | "size" | "dead";
 
 export type GuildConfig = {
   guildId: string;
@@ -78,6 +78,8 @@ export type GuildConfig = {
   agePanelMessageId: string | null;
   sizePanelChannelId: string | null;
   sizePanelMessageId: string | null;
+  deadPanelChannelId: string | null;
+  deadPanelMessageId: string | null;
 };
 
 export type XpAward = {

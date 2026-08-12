@@ -16,7 +16,8 @@ export const commands = [
             .setRequired(true)
             .addChoices(
               { name: "水替え", value: "water" },
-              { name: "大きさランキング", value: "size" }
+              { name: "大きさランキング", value: "size" },
+              { name: "枯れたまりもランキング", value: "dead" }
             )
         )
     )

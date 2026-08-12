@@ -46,6 +46,8 @@ type ConfigRow = QueryResultRow & {
   age_panel_message_id: string | null;
   size_panel_channel_id: string | null;
   size_panel_message_id: string | null;
+  dead_panel_channel_id: string | null;
+  dead_panel_message_id: string | null;
 };
 
 type WateringLogRow = MarimoRow & {
@@ -83,7 +85,8 @@ const panelColumns: Record<PanelKind, { channel: string; message: string }> = {
     channel: "water_panel_channel_id",
     message: "water_panel_message_id"
   },
-  size: { channel: "size_panel_channel_id", message: "size_panel_message_id" }
+  size: { channel: "size_panel_channel_id", message: "size_panel_message_id" },
+  dead: { channel: "dead_panel_channel_id", message: "dead_panel_message_id" }
 };
 
 function dateString(value: string | Date): string {
@@ -119,7 +122,9 @@ function configFromRow(row: ConfigRow): GuildConfig {
     agePanelChannelId: row.age_panel_channel_id,
     agePanelMessageId: row.age_panel_message_id,
     sizePanelChannelId: row.size_panel_channel_id,
-    sizePanelMessageId: row.size_panel_message_id
+    sizePanelMessageId: row.size_panel_message_id,
+    deadPanelChannelId: row.dead_panel_channel_id,
+    deadPanelMessageId: row.dead_panel_message_id
   };
 }
 
@@ -442,6 +447,16 @@ export class MarimoRepository {
       }));
   }
 
+  public async deadRankings(guildId: string): Promise<DeadMarimo[]> {
+    const result = await this.pool.query<DeadMarimoRow>(
+      `SELECT * FROM marimos
+       WHERE guild_id = $1 AND died_at IS NOT NULL
+       ORDER BY final_size_mm DESC, died_at ASC, id ASC`,
+      [guildId]
+    );
+    return result.rows.map(deadFromRow);
+  }
+
   public async dueOwners(
     now: Date
   ): Promise<{ guildId: string; userId: string }[]> {
@@ -683,7 +698,9 @@ export class MarimoRepository {
       agePanelChannelId: null,
       agePanelMessageId: null,
       sizePanelChannelId: null,
-      sizePanelMessageId: null
+      sizePanelMessageId: null,
+      deadPanelChannelId: null,
+      deadPanelMessageId: null
     };
   }
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { marimoDialogueText } from "../domain/dialogue.js";
-import type { RankingEntry } from "../domain/types.js";
+import type { DeadMarimo, RankingEntry } from "../domain/types.js";
 import {
+  deadRankingPanel,
   deathLogContent,
   isCareStreakMilestone,
   nameModal,
@@ -30,6 +31,21 @@ function entry(userId: string, age: number, size: number): RankingEntry {
     lastWateredDate: "2026-08-10",
     ageDays: age,
     sizeMm: size
+  };
+}
+
+function deadEntry(
+  userId: string,
+  generation: number,
+  finalSizeMm: number
+): DeadMarimo {
+  return {
+    ...entry(userId, 1, finalSizeMm),
+    generation,
+    diedAt: new Date(
+      `2026-08-${String(generation + 10).padStart(2, "0")}T15:00:00Z`
+    ),
+    finalSizeMm
   };
 }
 
@@ -176,6 +192,37 @@ describe("Discord presentation", () => {
     expect(ranking).toContain("<@owner-10>");
     expect(ranking).toContain("<@owner-11>");
     expect(ranking?.match(/<@owner-/g)).toHaveLength(11);
+  });
+
+  it("ranks dead marimos separately by final size with displayed-size ties", () => {
+    const panel = deadRankingPanel(
+      [
+        deadEntry("small", 3, 12),
+        deadEntry("large-a", 1, 99),
+        deadEntry("large-b", 2, 99.001)
+      ],
+      new Date("2026-08-20T00:00:00Z")
+    );
+    const ranking = [
+      panel.embeds[0]?.data.title,
+      panel.embeds[0]?.data.description
+    ].join("\n");
+
+    expect(panel.content).toBe("");
+    expect(panel.components).toEqual([]);
+    expect(panel.flags).toEqual([]);
+    expect(ranking).toContain("🥀 枯れたまりも大きさランキング");
+    expect(ranking).toContain("**1位**｜<@large-a>｜**99.00 mm**｜第1世代");
+    expect(ranking).toContain("**1位**｜<@large-b>｜**99.00 mm**｜第2世代");
+    expect(ranking).toContain("**3位**｜<@small>｜**12.00 mm**｜第3世代");
+    expect(ranking.indexOf("large-a")).toBeLessThan(ranking.indexOf("small"));
+  });
+
+  it("explains when the dead marimo ranking is empty", () => {
+    const ranking = deadRankingPanel([], new Date("2026-08-20T00:00:00Z"))
+      .embeds[0]?.data.description;
+
+    expect(ranking).toContain("まだ枯れたまりもはいません。");
   });
 
   it("announces a first interaction as a birth, not a water change", () => {

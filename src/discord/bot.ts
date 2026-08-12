@@ -34,6 +34,7 @@ import type {
 } from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
 import {
+  deadRankingPanel,
   deathLogContent,
   displayMarimoName,
   isCareStreakMilestone,
@@ -63,7 +64,10 @@ function panelIds(
   if (kind === "water") {
     return [config.waterPanelChannelId, config.waterPanelMessageId];
   }
-  return [config.sizePanelChannelId, config.sizePanelMessageId];
+  if (kind === "size") {
+    return [config.sizePanelChannelId, config.sizePanelMessageId];
+  }
+  return [config.deadPanelChannelId, config.deadPanelMessageId];
 }
 
 function configuredChannel(
@@ -706,6 +710,7 @@ export class MarimoBot {
         "# まりもBot設定",
         `水替えパネル: ${configuredChannel(config.waterPanelMessageId, config.waterPanelChannelId)}`,
         `大きさランキング: ${configuredChannel(config.sizePanelMessageId, config.sizePanelChannelId)}`,
+        `枯れたまりもランキング: ${configuredChannel(config.deadPanelMessageId, config.deadPanelChannelId)}`,
         `画像ログ: ${config.logChannelId === null ? "未設定" : `<#${config.logChannelId}>`}`,
         `利用可能ロール: ${allowedRoleIds.length === 0 ? "未設定（全員利用可能）" : allowedRoleIds.map((roleId) => `<@&${roleId}>`).join("、")}`,
         `XP連携: ${this.xpDelivery.enabled ? "有効" : "未設定（outboxに保持）"}`
@@ -802,18 +807,20 @@ export class MarimoBot {
     const kind = interaction.options.getString("type", true) as PanelKind;
     const oldConfig = await this.repository.getConfig(interaction.guildId);
     const now = new Date();
-    const entries = await this.repository.rankings(interaction.guildId, now);
-    const payload =
-      kind === "water"
-        ? {
-            ...waterPanel(this.config.WATER_XP),
-            allowedMentions: { parse: [] }
-          }
-        : {
-            ...rankingPanel(entries, now),
-            allowedMentions: { parse: [] }
-          };
-    const message = await interaction.channel.send(payload);
+    let payload;
+    if (kind === "water") {
+      payload = waterPanel(this.config.WATER_XP);
+    } else if (kind === "size") {
+      const entries = await this.repository.rankings(interaction.guildId, now);
+      payload = rankingPanel(entries, now);
+    } else {
+      const entries = await this.repository.deadRankings(interaction.guildId);
+      payload = deadRankingPanel(entries, now);
+    }
+    const message = await interaction.channel.send({
+      ...payload,
+      allowedMentions: { parse: [] }
+    });
     await this.repository.setPanel(
       interaction.guildId,
       kind,
@@ -935,16 +942,25 @@ export class MarimoBot {
   }
 
   private async updateRankings(guildId: string, now: Date): Promise<void> {
-    const [config, entries] = await Promise.all([
+    const [config, livingEntries, deadEntries] = await Promise.all([
       this.repository.getConfig(guildId),
-      this.repository.rankings(guildId, now)
+      this.repository.rankings(guildId, now),
+      this.repository.deadRankings(guildId)
     ]);
-    await this.editRanking(
-      config.sizePanelChannelId,
-      config.sizePanelMessageId,
-      entries,
-      now
-    );
+    await Promise.all([
+      this.editRanking(
+        config.sizePanelChannelId,
+        config.sizePanelMessageId,
+        livingEntries,
+        now
+      ),
+      this.editDeadRanking(
+        config.deadPanelChannelId,
+        config.deadPanelMessageId,
+        deadEntries,
+        now
+      )
+    ]);
   }
 
   private async refreshWaterPanels(): Promise<void> {
@@ -1035,6 +1051,28 @@ export class MarimoBot {
         this.logger.warn(
           { error: errorDetails(error), channelId, messageId },
           "Ranking update failed"
+        );
+      });
+  }
+
+  private async editDeadRanking(
+    channelId: string | null,
+    messageId: string | null,
+    entries: DeadMarimo[],
+    now: Date
+  ): Promise<void> {
+    if (channelId === null || messageId === null) return;
+    const message = await this.fetchMessage(channelId, messageId);
+    if (message === null) return;
+    await message
+      .edit({
+        ...deadRankingPanel(entries, now),
+        allowedMentions: { parse: [] }
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          { error: errorDetails(error), channelId, messageId },
+          "Dead ranking update failed"
         );
       });
   }

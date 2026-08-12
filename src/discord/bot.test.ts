@@ -52,7 +52,9 @@ const guildConfig: GuildConfig = {
   agePanelChannelId: null,
   agePanelMessageId: null,
   sizePanelChannelId: null,
-  sizePanelMessageId: null
+  sizePanelMessageId: null,
+  deadPanelChannelId: null,
+  deadPanelMessageId: null
 };
 
 const living: RankingEntry = {
@@ -102,6 +104,12 @@ type RankingUpdater = {
     entries: RankingEntry[],
     now: Date
   ): Promise<void>;
+  editDeadRanking(
+    channelId: string | null,
+    messageId: string | null,
+    entries: DeadMarimo[],
+    now: Date
+  ): Promise<void>;
   fetchMessage(channelId: string, messageId: string): Promise<Message | null>;
 };
 
@@ -148,7 +156,7 @@ type PanelPoster = {
   postPanel(interaction: ChatInputCommandInteraction): Promise<void>;
   deactivateOldPanel(
     config: GuildConfig,
-    kind: "water" | "size"
+    kind: "water" | "size" | "dead"
   ): Promise<void>;
 };
 
@@ -783,21 +791,72 @@ describe("panel interaction wiring", () => {
     );
   });
 
-  it("updates only the combined size leaderboard", async () => {
+  it("posts the dead ranking as an independent persistent panel", async () => {
+    const rankings = vi.fn().mockResolvedValue([living]);
+    const deadRankings = vi.fn().mockResolvedValue([death]);
+    const setPanel = vi.fn().mockResolvedValue(undefined);
+    const oldConfig = {
+      ...guildConfig,
+      deadPanelChannelId: "old-dead-channel",
+      deadPanelMessageId: "old-dead-message"
+    };
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue(oldConfig),
+      rankings,
+      deadRankings,
+      setPanel
+    }) as unknown as PanelPoster;
+    Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
+    const deactivateOldPanel = vi.fn().mockResolvedValue(undefined);
+    bot.deactivateOldPanel = deactivateOldPanel;
+    const send = vi.fn().mockResolvedValue({ id: "new-dead-message" });
+
+    await bot.postPanel({
+      guildId: "1001",
+      channel: textChannelWithSend(send),
+      options: { getString: () => "dead" },
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply: vi.fn().mockResolvedValue(undefined)
+    } as unknown as ChatInputCommandInteraction);
+
+    expect(deadRankings).toHaveBeenCalledWith("1001");
+    expect(rankings).not.toHaveBeenCalled();
+    const payload = send.mock.calls[0]?.[0] as {
+      embeds: { data: { title?: string; description?: string } }[];
+    };
+    expect(payload.embeds[0]?.data.title).toBe(
+      "🥀 枯れたまりも大きさランキング"
+    );
+    expect(payload.embeds[0]?.data.description).toContain("<@2001>");
+    expect(setPanel).toHaveBeenCalledWith(
+      "1001",
+      "dead",
+      "3001",
+      "new-dead-message"
+    );
+    expect(deactivateOldPanel).toHaveBeenCalledWith(oldConfig, "dead");
+  });
+
+  it("wires living and dead entries to their own ranking panels", async () => {
     const configured = {
       ...guildConfig,
       agePanelChannelId: "old-age-channel",
       agePanelMessageId: "old-age-message",
       sizePanelChannelId: "size-channel",
-      sizePanelMessageId: "size-message"
+      sizePanelMessageId: "size-message",
+      deadPanelChannelId: "dead-channel",
+      deadPanelMessageId: "dead-message"
     };
     const repository: Partial<MarimoRepository> = {
       getConfig: vi.fn().mockResolvedValue(configured),
-      rankings: vi.fn().mockResolvedValue([living])
+      rankings: vi.fn().mockResolvedValue([living]),
+      deadRankings: vi.fn().mockResolvedValue([death])
     };
     const bot = botWith(repository) as unknown as RankingUpdater;
     const editRanking = vi.fn().mockResolvedValue(undefined);
+    const editDeadRanking = vi.fn().mockResolvedValue(undefined);
     bot.editRanking = editRanking;
+    bot.editDeadRanking = editDeadRanking;
     const now = new Date("2026-08-10T00:00:00Z");
 
     await bot.updateRankings("1001", now);
@@ -807,6 +866,13 @@ describe("panel interaction wiring", () => {
       "size-channel",
       "size-message",
       [living],
+      now
+    );
+    expect(editDeadRanking).toHaveBeenCalledOnce();
+    expect(editDeadRanking).toHaveBeenCalledWith(
+      "dead-channel",
+      "dead-message",
+      [death],
       now
     );
   });
@@ -862,6 +928,34 @@ describe("panel interaction wiring", () => {
       embeds: { data: { title?: string; description?: string } }[];
     };
     expect(payload.embeds[0]?.data.title).toBe("📏 巨大まりもランキング");
+    expect(payload.embeds[0]?.data.description).toContain("<@2001>");
+  });
+
+  it("converts the existing dead ranking panel to an embed during update", async () => {
+    const bot = botWith({}) as unknown as RankingUpdater;
+    const edit = vi.fn().mockResolvedValue(undefined);
+    bot.fetchMessage = vi.fn().mockResolvedValue({ edit });
+
+    await bot.editDeadRanking(
+      "dead-channel",
+      "dead-message",
+      [death],
+      new Date("2026-08-10T00:00:00Z")
+    );
+
+    expect(edit).toHaveBeenCalledOnce();
+    expect(edit.mock.calls[0]?.[0]).toMatchObject({
+      content: "",
+      components: [],
+      flags: [],
+      allowedMentions: { parse: [] }
+    });
+    const payload = edit.mock.calls[0]?.[0] as {
+      embeds: { data: { title?: string; description?: string } }[];
+    };
+    expect(payload.embeds[0]?.data.title).toBe(
+      "🥀 枯れたまりも大きさランキング"
+    );
     expect(payload.embeds[0]?.data.description).toContain("<@2001>");
   });
 

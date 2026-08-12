@@ -6,10 +6,12 @@ describe("Discord commands", () => {
     expect(commands.map((command) => command.name)).toEqual(["marimo-admin"]);
   });
 
-  it("offers one combined size leaderboard", () => {
+  it("offers separate living and dead size leaderboards", () => {
     const commandJson = JSON.stringify(commands);
 
     expect(commandJson).toContain('"value":"size"');
+    expect(commandJson).toContain('"value":"dead"');
+    expect(commandJson).toContain("枯れたまりもランキング");
     expect(commandJson).not.toContain('"value":"age"');
     expect(commandJson).not.toContain("生存日数ランキング");
   });
