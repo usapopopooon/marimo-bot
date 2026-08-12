@@ -466,7 +466,7 @@ describe("panel interaction wiring", () => {
     });
   });
 
-  it("charges 3,000 XP once and revives the same marimo generation", async () => {
+  it("charges 1,000 XP once and revives the same marimo generation", async () => {
     const eventId = "00000000-0000-4000-8000-000000000099";
     const requestedAt = new Date("2026-08-12T03:00:00Z");
     const prepareRevival = vi.fn().mockResolvedValue({
@@ -480,13 +480,13 @@ describe("panel interaction wiring", () => {
     const completeRevival = vi.fn().mockResolvedValue({
       ...living,
       eventId,
-      costXp: 3000,
+      costXp: 1000,
       ageDays: 1,
       sizeMm: 10.01
     });
     const spendRevival = vi.fn().mockResolvedValue({
       status: "charged",
-      costXp: 3000,
+      costXp: 1000,
       remainingXp: 250,
       duplicate: false
     });
@@ -532,13 +532,14 @@ describe("panel interaction wiring", () => {
       guildId: "1001",
       userId: "2001",
       displayName: "owner",
+      costXp: 1000,
       now: expect.any(Date)
     });
     expect(editReply).toHaveBeenCalledWith({
       content: [
         "🌿 **まりも** が生き返りました。",
         "第1世代｜飼育 **1日**｜**10.01 mm**",
-        "**-3,000 XP**｜残り **250 XP**"
+        "**-1,000 XP**｜残り **250 XP**"
       ].join("\n")
     });
   });
@@ -567,8 +568,8 @@ describe("panel interaction wiring", () => {
         revivalEnabled: true,
         spendRevival: vi.fn().mockResolvedValue({
           status: "insufficient_xp",
-          costXp: 3000,
-          remainingXp: 2999,
+          costXp: 1000,
+          remainingXp: 999,
           duplicate: false
         })
       }
@@ -594,7 +595,7 @@ describe("panel interaction wiring", () => {
       userId: "2001"
     });
     expect(editReply).toHaveBeenCalledWith({
-      content: "復活には **3,000 XP** 必要です。現在は **2,999 XP** です。"
+      content: "復活には **1,000 XP** 必要です。現在は **999 XP** です。"
     });
   });
 

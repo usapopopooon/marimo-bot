@@ -378,25 +378,31 @@ suite("MarimoRepository integration", () => {
       now: new Date("2026-08-14T04:00:00Z")
     });
     expect(blockedWatering.status).toBe("revival-pending");
+    await pool.query(
+      "UPDATE marimo_revivals SET cost_xp = 3000 WHERE event_id = $1",
+      [first.eventId]
+    );
 
     const revived = await repository.completeRevival({
       eventId: first.eventId,
       guildId: input.guildId,
       userId: input.userId,
       displayName: input.displayName,
+      costXp: 1000,
       now: new Date("2026-08-14T03:00:00Z")
     });
     expect(revived.generation).toBe(1);
     expect(revived.name).toBe("復活組のまりも");
     expect(revived.ageDays).toBe(3);
     expect(revived.sizeMm).toBe(10.6);
-    expect(revived.costXp).toBe(3000);
+    expect(revived.costXp).toBe(1000);
 
     const completedAgain = await repository.completeRevival({
       eventId: first.eventId,
       guildId: input.guildId,
       userId: input.userId,
       displayName: input.displayName,
+      costXp: 1000,
       now: new Date("2026-08-14T03:00:00Z")
     });
     expect(completedAgain.id).toBe(revived.id);

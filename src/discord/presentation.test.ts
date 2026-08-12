@@ -54,7 +54,7 @@ describe("Discord presentation", () => {
         "",
         "⚠️ **水替えを忘れると…**",
         "丸一日忘れると枯れてしまいます。",
-        "枯れたまりもは **3,000 XP**で生き返らせることもできます。",
+        "枯れたまりもは **1,000 XP**で生き返らせることもできます。",
         "新しく育て直す場合は **100 XP**から再スタートします。"
       ].join("\n")
     );
@@ -76,7 +76,7 @@ describe("Discord presentation", () => {
     ).toContainEqual(
       expect.objectContaining({
         custom_id: REVIVE_BUTTON_ID,
-        label: "3,000 XPで復活"
+        label: "1,000 XPで復活"
       })
     );
   });

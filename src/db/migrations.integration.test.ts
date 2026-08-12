@@ -191,4 +191,91 @@ suite("database migration upgrade", () => {
       await admin.end();
     }
   });
+
+  it("lowers new revival costs without rewriting historical charges", async () => {
+    const admin = new Pool({ connectionString: databaseUrl });
+    const schema = "marimo_revival_cost_upgrade_test";
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`
+    });
+
+    try {
+      for (const migration of [
+        "001_initial.sql",
+        "002_watering_log_delivery.sql",
+        "003_xp_compensation.sql",
+        "004_watering_birth.sql",
+        "005_xp_delivery_fairness.sql",
+        "006_calendar_day_growth.sql",
+        "007_allowed_roles.sql",
+        "008_marimo_revival.sql"
+      ]) {
+        await pool.query(
+          await readFile(
+            resolve(process.cwd(), "migrations", migration),
+            "utf8"
+          )
+        );
+      }
+      const marimo = await pool.query<{ id: string }>(
+        `INSERT INTO marimos (
+           guild_id, user_id, generation, owner_display_name, name,
+           born_at, last_watered_at, last_watered_date,
+           died_at, final_size_mm, death_reason
+         ) VALUES ('1001', '2001', 1, 'owner', 'まりも',
+                   '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10',
+                   '2026-08-12T15:00:00Z', 10.6, 'missed-care')
+         RETURNING id`
+      );
+      const marimoId = marimo.rows[0]?.id;
+      if (marimoId === undefined) throw new Error("expected marimo row");
+      await pool.query(
+        `INSERT INTO marimo_revivals (
+           event_id, marimo_id, guild_id, user_id, channel_id, status,
+           generation, owner_display_name, name, born_at,
+           last_watered_at, last_watered_date, died_at, final_size_mm,
+           requested_at
+         ) VALUES (
+           '00000000-0000-4000-8000-000000000091', $1,
+           '1001', '2001', '3001', 'completed', 1, 'owner', 'まりも',
+           '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10',
+           '2026-08-12T15:00:00Z', 10.6, '2026-08-13T03:00:00Z'
+         )`,
+        [marimoId]
+      );
+
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "009_lower_revival_cost.sql"),
+          "utf8"
+        )
+      );
+      await pool.query(
+        `INSERT INTO marimo_revivals (
+           event_id, marimo_id, guild_id, user_id, channel_id,
+           generation, owner_display_name, name, born_at,
+           last_watered_at, last_watered_date, died_at, final_size_mm,
+           requested_at
+         ) VALUES (
+           '00000000-0000-4000-8000-000000000092', $1,
+           '1001', '2001', '3001', 1, 'owner', 'まりも',
+           '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10',
+           '2026-08-12T15:00:00Z', 10.6, '2026-08-13T04:00:00Z'
+         )`,
+        [marimoId]
+      );
+
+      const costs = await pool.query<{ cost_xp: number }>(
+        "SELECT cost_xp FROM marimo_revivals ORDER BY event_id"
+      );
+      expect(costs.rows.map((row) => row.cost_xp)).toEqual([3000, 1000]);
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
 });

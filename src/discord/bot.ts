@@ -25,7 +25,7 @@ import type {
   Revival,
   Watering
 } from "../domain/types.js";
-import { wateringXp } from "../domain/rewards.js";
+import { REVIVAL_COST_XP, wateringXp } from "../domain/rewards.js";
 import { renderTankImage } from "../rendering/tank.js";
 import type {
   RevivalSpendResult,
@@ -355,8 +355,7 @@ export class MarimoBot {
     });
     if (result.status === "revival-pending") {
       await interaction.editReply({
-        content:
-          "復活処理が途中です。「3,000 XPで復活」をもう一度押してください。XPは二重に消費されません。"
+        content: `復活処理が途中です。「${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活」をもう一度押してください。XPは二重に消費されません。`
       });
       return;
     }
@@ -458,8 +457,7 @@ export class MarimoBot {
         "Revival XP request failed"
       );
       await interaction.editReply({
-        content:
-          "XPの確認が完了しませんでした。「3,000 XPで復活」をもう一度押してください。XPは二重に消費されません。"
+        content: `XPの確認が完了しませんでした。「${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活」をもう一度押してください。XPは二重に消費されません。`
       });
       return;
     }
@@ -470,7 +468,7 @@ export class MarimoBot {
         userId
       });
       await interaction.editReply({
-        content: `復活には **3,000 XP** 必要です。現在は **${spend.remainingXp.toLocaleString("ja-JP")} XP** です。`
+        content: `復活には **${spend.costXp.toLocaleString("ja-JP")} XP** 必要です。現在は **${spend.remainingXp.toLocaleString("ja-JP")} XP** です。`
       });
       return;
     }
@@ -482,6 +480,7 @@ export class MarimoBot {
         guildId,
         userId,
         displayName: displayName(interaction),
+        costXp: spend.costXp,
         now: new Date()
       });
     } catch (error) {

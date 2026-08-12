@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   DAILY_WATER_XP_INCREMENT,
   MAX_WATER_XP,
+  REVIVAL_COST_XP,
   wateringXp
 } from "./rewards.js";
 
 describe("watering XP", () => {
+  it("charges 1,000 XP to revive a marimo", () => {
+    expect(REVIVAL_COST_XP).toBe(1000);
+  });
+
   it("starts at 100 XP and increases by 10 XP per continuous care day", () => {
     expect(DAILY_WATER_XP_INCREMENT).toBe(10);
     expect(wateringXp(100, 1)).toBe(100);

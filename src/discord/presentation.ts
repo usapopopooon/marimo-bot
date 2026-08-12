@@ -12,6 +12,7 @@ import {
 import {
   DAILY_WATER_XP_INCREMENT,
   MAX_WATER_XP,
+  REVIVAL_COST_XP,
   wateringXp
 } from "../domain/rewards.js";
 import { jstDate } from "../domain/time.js";
@@ -56,7 +57,7 @@ export function waterPanel(waterXp: number): {
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(REVIVE_BUTTON_ID)
-      .setLabel("3,000 XPで復活")
+      .setLabel(`${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活`)
       .setEmoji("🌿")
       .setStyle(ButtonStyle.Success)
   );
@@ -82,7 +83,7 @@ export function waterPanel(waterXp: number): {
             "",
             "⚠️ **水替えを忘れると…**",
             "丸一日忘れると枯れてしまいます。",
-            "枯れたまりもは **3,000 XP**で生き返らせることもできます。",
+            `枯れたまりもは **${REVIVAL_COST_XP.toLocaleString("ja-JP")} XP**で生き返らせることもできます。`,
             `新しく育て直す場合は **${waterXp} XP**から再スタートします。`
           ].join("\n")
         )

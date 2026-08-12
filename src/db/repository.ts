@@ -558,6 +558,7 @@ export class MarimoRepository {
     guildId: string;
     userId: string;
     displayName: string;
+    costXp: number;
     now: Date;
   }): Promise<Revival> {
     return this.transaction(async (client) => {
@@ -572,7 +573,11 @@ export class MarimoRepository {
         [input.eventId, input.guildId, input.userId]
       );
       const revival = firstRow(revivalResult.rows, "revival lookup");
+      if (!Number.isInteger(input.costXp) || input.costXp <= 0)
+        throw new Error("revival cost must be a positive integer");
       let marimo: LivingMarimo;
+      const costXp =
+        revival.status === "completed" ? revival.cost_xp : input.costXp;
       if (revival.status === "completed") {
         const current = await this.findLiving(
           client,
@@ -615,15 +620,16 @@ export class MarimoRepository {
         marimo = livingFromRow(firstRow(updated.rows, "marimo revival"));
         await client.query(
           `UPDATE marimo_revivals
-           SET status = 'completed', revived_at = $2, updated_at = NOW()
+           SET status = 'completed', revived_at = $2, cost_xp = $3,
+               updated_at = NOW()
            WHERE event_id = $1`,
-          [input.eventId, input.now]
+          [input.eventId, input.now, costXp]
         );
       }
       return {
         ...marimo,
         eventId: input.eventId,
-        costXp: revival.cost_xp,
+        costXp,
         sizeMm: sizeAt(marimo.bornAt, input.now),
         ageDays: ageDays(marimo.bornAt, input.now)
       };

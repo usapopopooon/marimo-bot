@@ -111,7 +111,7 @@ describe("XP delivery wiring", () => {
       Response.json({
         event_id: "00000000-0000-4000-8000-000000000099",
         status: "charged",
-        cost_xp: 3000,
+        cost_xp: 1000,
         remaining_xp: 125,
         duplicate: false
       })
@@ -133,7 +133,7 @@ describe("XP delivery wiring", () => {
 
     expect(result).toEqual({
       status: "charged",
-      costXp: 3000,
+      costXp: 1000,
       remainingXp: 125,
       duplicate: false
     });
