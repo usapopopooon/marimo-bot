@@ -543,7 +543,12 @@ export class MarimoBot {
     }
     const image = await renderLivingTankImage(entry);
     await interaction.editReply({
-      content: statusContent(entry, this.config.WATER_XP, now),
+      content: statusContent(
+        entry,
+        this.config.WATER_XP,
+        now,
+        entry.dialogueId
+      ),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })]
     });
   }

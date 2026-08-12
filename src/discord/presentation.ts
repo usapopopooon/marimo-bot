@@ -10,6 +10,10 @@ import {
   TextInputStyle
 } from "discord.js";
 import {
+  isCareStreakMilestone,
+  marimoDialogueText
+} from "../domain/dialogue.js";
+import {
   DAILY_WATER_XP_INCREMENT,
   MAX_WATER_XP,
   REVIVAL_COST_XP,
@@ -25,14 +29,7 @@ export const REVIVE_BUTTON_ID = "marimo:revive";
 export const NAME_MODAL_ID = "marimo:name-modal";
 export const NAME_INPUT_ID = "marimo:name-input";
 const MARIMO_GREEN = 0x20a51f;
-const EARLY_CARE_STREAK_MILESTONES = new Set([2, 3, 5]);
-
-export function isCareStreakMilestone(ageDays: number): boolean {
-  return (
-    EARLY_CARE_STREAK_MILESTONES.has(ageDays) ||
-    (ageDays >= 10 && ageDays % 10 === 0)
-  );
-}
+export { isCareStreakMilestone };
 
 export function displayMarimoName(name: string): string {
   return escapeMarkdown(name);
@@ -157,22 +154,26 @@ export function rankingPanel(
 export function statusContent(
   entry: RankingEntry,
   baseXp: number,
-  now: Date
+  now: Date,
+  dialogueId: string | null = null
 ): string {
   const nextCareDay =
     entry.lastWateredDate === jstDate(now) ? entry.ageDays + 1 : entry.ageDays;
+  const dialogue = marimoDialogueText(dialogueId);
   return [
     `# 🟢 ${displayMarimoName(entry.name)}`,
     `第${entry.generation}世代｜連続飼育 **${entry.ageDays}日**`,
     `大きさ **${entry.sizeMm.toFixed(2)} mm**`,
     `最後の水替え **${entry.lastWateredDate}**`,
     `次の水替え **${wateringXp(baseXp, nextCareDay)} XP**`,
+    ...(dialogue === null ? [] : ["", `> 🟢 まりも「${dialogue}」`]),
     "",
     "-# 水を替えない日が丸一日続くと枯れてしまいます"
   ].join("\n");
 }
 
 export function wateringLogContent(watering: Watering): string {
+  const dialogue = marimoDialogueText(watering.dialogueId);
   const celebration =
     !watering.isBirth && isCareStreakMilestone(watering.ageDays)
       ? [
@@ -186,7 +187,8 @@ export function wateringLogContent(watering: Watering): string {
       ? `🟢 ${ownerMention(watering.marimo.userId)} の **${displayMarimoName(watering.marimo.name)}** が生まれました`
       : `🫧 ${ownerMention(watering.marimo.userId)} が **${displayMarimoName(watering.marimo.name)}** の水を替えました`,
     `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`,
-    ...celebration
+    ...celebration,
+    ...(dialogue === null ? [] : ["", `> 🟢 まりも「${dialogue}」`])
   ].join("\n");
 }
 

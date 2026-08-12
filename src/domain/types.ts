@@ -24,6 +24,7 @@ export type Watering = {
   ageDays: number;
   awardedXp: number;
   isBirth: boolean;
+  dialogueId: string | null;
 };
 
 export type PendingWateringLog = Watering & {
@@ -60,6 +61,10 @@ export type Revival = RankingEntry & {
 export type RankingEntry = LivingMarimo & {
   sizeMm: number;
   ageDays: number;
+};
+
+export type PersonalMarimoStatus = RankingEntry & {
+  dialogueId: string | null;
 };
 
 export type PanelKind = "water" | "size";

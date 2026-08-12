@@ -28,6 +28,26 @@ suite("MarimoRepository integration", () => {
       now: new Date("2026-08-10T03:00:00Z"),
       baseXp: 100
     });
+    expect(first.status).toBe("watered");
+    if (first.status !== "watered") throw new Error("expected watering");
+    expect(
+      (
+        await repository.getLiving(
+          "1001",
+          "2001",
+          new Date("2026-08-10T08:00:00Z")
+        )
+      )?.dialogueId
+    ).toBe(first.watering.dialogueId);
+    expect(
+      (
+        await repository.getLiving(
+          "1001",
+          "2001",
+          new Date("2026-08-10T15:01:00Z")
+        )
+      )?.dialogueId
+    ).toBeNull();
     const duplicate = await repository.water({
       guildId: "1001",
       userId: "2001",
@@ -53,12 +73,10 @@ suite("MarimoRepository integration", () => {
       baseXp: 100
     });
 
-    expect(first.status).toBe("watered");
     expect(duplicate.status).toBe("already-watered");
     expect(continued.status).toBe("watered");
     expect(nextGeneration.status).toBe("watered");
-    if (first.status !== "watered" || continued.status !== "watered")
-      throw new Error("expected watering");
+    if (continued.status !== "watered") throw new Error("expected watering");
     if (nextGeneration.status !== "watered")
       throw new Error("expected watering");
     expect(first.watering.isBirth).toBe(true);
@@ -66,6 +84,16 @@ suite("MarimoRepository integration", () => {
     expect(nextGeneration.death?.generation).toBe(1);
     expect(nextGeneration.watering.marimo.generation).toBe(2);
     expect(nextGeneration.watering.isBirth).toBe(true);
+    expect(first.watering.dialogueId).toMatch(/^birth-/);
+    expect(continued.watering.dialogueId).toMatch(/^milestone-/);
+    expect(nextGeneration.watering.dialogueId).toMatch(/^birth-/);
+    expect(
+      new Set([
+        first.watering.dialogueId,
+        continued.watering.dialogueId,
+        nextGeneration.watering.dialogueId
+      ]).size
+    ).toBe(3);
 
     const awards = await repository.pendingXp();
     expect(awards).toHaveLength(3);
@@ -90,6 +118,11 @@ suite("MarimoRepository integration", () => {
     expect(pendingLogs.map((watering) => watering.awardedXp)).toEqual([
       100, 110, 100
     ]);
+    expect(pendingLogs.map((watering) => watering.dialogueId)).toEqual([
+      first.watering.dialogueId,
+      continued.watering.dialogueId,
+      nextGeneration.watering.dialogueId
+    ]);
     const fullWateringHistory = await repository.wateringLogHistory(
       "1001",
       new Date("2026-08-13T00:00:00Z")
@@ -101,6 +134,11 @@ suite("MarimoRepository integration", () => {
     ]);
     expect(fullWateringHistory.map((event) => event.awardedXp)).toEqual([
       100, 110, 100
+    ]);
+    expect(fullWateringHistory.map((event) => event.dialogueId)).toEqual([
+      first.watering.dialogueId,
+      continued.watering.dialogueId,
+      nextGeneration.watering.dialogueId
     ]);
     expect(
       await repository.wateringLogHistory(

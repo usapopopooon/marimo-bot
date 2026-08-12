@@ -77,7 +77,8 @@ const watering: Watering = {
   sizeMm: 10,
   ageDays: 1,
   awardedXp: 100,
-  isBirth: false
+  isBirth: false,
+  dialogueId: "everyday-01-01"
 };
 
 const death: DeadMarimo = {
@@ -389,7 +390,10 @@ describe("panel interaction wiring", () => {
   });
 
   it("shows the current tank image only to the owner from the panel channel", async () => {
-    const getLiving = vi.fn().mockResolvedValue(living);
+    const getLiving = vi.fn().mockResolvedValue({
+      ...living,
+      dialogueId: "everyday-01-01"
+    });
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
 
@@ -430,6 +434,9 @@ describe("panel interaction wiring", () => {
       | undefined;
     expect(reply?.content).toContain("# 🟢 まりも");
     expect(reply?.content).toContain("大きさ **10.00 mm**");
+    expect(reply?.content).toContain(
+      "> 🟢 まりも「お水がきらきらして、ゆっくり丸くなれそう。」"
+    );
     expect(reply?.files).toHaveLength(1);
     expect(reply?.files[0]?.name).toBe("marimo-tank.png");
     expect(Buffer.isBuffer(reply?.files[0]?.attachment)).toBe(true);

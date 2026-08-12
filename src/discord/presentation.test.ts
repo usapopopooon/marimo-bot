@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { marimoDialogueText } from "../domain/dialogue.js";
 import type { RankingEntry } from "../domain/types.js";
 import {
   deathLogContent,
@@ -186,7 +187,8 @@ describe("Discord presentation", () => {
       wateredDate: "2026-08-10",
       sizeMm: 10,
       ageDays: 1,
-      awardedXp: 100
+      awardedXp: 100,
+      dialogueId: null
     };
 
     const birth = wateringLogContent({ ...base, isBirth: true });
@@ -211,7 +213,8 @@ describe("Discord presentation", () => {
       wateredDate: "2026-08-11",
       sizeMm: 10.3,
       awardedXp: 110,
-      isBirth: false
+      isBirth: false,
+      dialogueId: null
     };
 
     const milestone = wateringLogContent({ ...base, ageDays: 2 });
@@ -221,6 +224,29 @@ describe("Discord presentation", () => {
     expect(milestone).toContain("おめでとうございます！");
     expect(ordinary).not.toContain("🎉");
     expect(ordinary).not.toContain("おめでとうございます");
+  });
+
+  it("adds the persisted marimo line to new logs but not historical logs", () => {
+    const marimo = entry("owner", 4, 10.9);
+    const base = {
+      eventId: "00000000-0000-4000-8000-000000000001",
+      marimo,
+      wateredAt: new Date("2026-08-13T00:00:00Z"),
+      wateredDate: "2026-08-13",
+      sizeMm: 10.9,
+      ageDays: 4,
+      awardedXp: 130,
+      isBirth: false
+    };
+    const dialogueId = "everyday-01-01";
+    const dialogue = marimoDialogueText(dialogueId);
+    expect(dialogue).not.toBeNull();
+
+    const spoken = wateringLogContent({ ...base, dialogueId });
+    const historical = wateringLogContent({ ...base, dialogueId: null });
+
+    expect(spoken).toContain(`> 🟢 まりも「${dialogue}」`);
+    expect(historical).not.toContain("> 🟢 まりも「");
   });
 
   it("keeps Discord user mention syntax without URL links in death logs", () => {
@@ -247,6 +273,32 @@ describe("Discord presentation", () => {
 
     expect(status).toContain("連続飼育 **2日**");
     expect(status).toContain("次の水替え **120 XP**");
+  });
+
+  it("shows today's persisted marimo line in personal status", () => {
+    const marimo = {
+      ...entry("owner", 4, 10.9),
+      lastWateredDate: "2026-08-13"
+    };
+    const dialogueId = "everyday-01-01";
+    const dialogue = marimoDialogueText(dialogueId);
+    expect(dialogue).not.toBeNull();
+
+    const status = statusContent(
+      marimo,
+      100,
+      new Date("2026-08-13T03:00:00Z"),
+      dialogueId
+    );
+    const withoutTodayDialogue = statusContent(
+      marimo,
+      100,
+      new Date("2026-08-13T03:00:00Z"),
+      null
+    );
+
+    expect(status).toContain(`> 🟢 まりも「${dialogue}」`);
+    expect(withoutTodayDialogue).not.toContain("> 🟢 まりも「");
   });
 
   it("escapes formatting characters in user-defined marimo names", () => {

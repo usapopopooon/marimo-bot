@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
+import { selectMarimoDialogue } from "../domain/dialogue.js";
 import { wateringXp } from "../domain/rewards.js";
 import {
   ageDays,
@@ -15,6 +16,7 @@ import type {
   LivingMarimo,
   PanelKind,
   PendingWateringLog,
+  PersonalMarimoStatus,
   RankingEntry,
   Revival,
   RevivalPreparation,
@@ -54,6 +56,11 @@ type WateringLogRow = MarimoRow & {
   awarded_xp: number;
   log_delivery_attempts: number;
   is_birth: boolean;
+  dialogue_id: string | null;
+};
+
+type PersonalMarimoRow = MarimoRow & {
+  dialogue_id: string | null;
 };
 
 type DeadMarimoRow = MarimoRow & {
@@ -125,7 +132,8 @@ function wateringFromRow(row: WateringLogRow): Watering {
     sizeMm: Number(row.size_mm),
     ageDays: ageDays(new Date(row.born_at), new Date(row.watered_at)),
     awardedXp: row.awarded_xp,
-    isBirth: row.is_birth
+    isBirth: row.is_birth,
+    dialogueId: row.dialogue_id
   };
 }
 
@@ -231,12 +239,30 @@ export class MarimoRepository {
       const currentSize = sizeAt(active.bornAt, input.now);
       const currentAgeDays = ageDays(active.bornAt, input.now);
       const awardedXp = wateringXp(input.baseXp, currentAgeDays);
+      const recentDialogues = await client.query<{ dialogue_id: string }>(
+        `SELECT dialogue_id
+         FROM marimo_waterings
+         WHERE guild_id = $1 AND user_id = $2 AND dialogue_id IS NOT NULL
+         ORDER BY watered_at DESC, created_at DESC, event_id DESC
+         LIMIT 7`,
+        [input.guildId, input.userId]
+      );
+      const dialogueId = selectMarimoDialogue({
+        eventId,
+        isBirth,
+        ageDays: currentAgeDays,
+        sizeMm: currentSize,
+        wateredDate: today,
+        recentDialogueIds: recentDialogues.rows.map((row) => row.dialogue_id)
+      }).id;
       await client.query(
         `INSERT INTO marimo_waterings (
            event_id, marimo_id, guild_id, user_id, channel_id,
            watered_date, watered_at, size_mm, awarded_xp,
-           log_delivery_status, is_birth
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)`,
+           log_delivery_status, is_birth, dialogue_id
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11
+         )`,
         [
           eventId,
           active.id,
@@ -247,7 +273,8 @@ export class MarimoRepository {
           input.now,
           currentSize,
           awardedXp,
-          isBirth
+          isBirth,
+          dialogueId
         ]
       );
       await client.query(
@@ -275,7 +302,8 @@ export class MarimoRepository {
           sizeMm: currentSize,
           ageDays: currentAgeDays,
           awardedXp,
-          isBirth
+          isBirth,
+          dialogueId
         },
         ...(death === undefined ? {} : { death })
       };
@@ -365,11 +393,14 @@ export class MarimoRepository {
     guildId: string,
     userId: string,
     now: Date
-  ): Promise<RankingEntry | null> {
-    const result = await this.pool.query<MarimoRow>(
-      `SELECT * FROM marimos
-       WHERE guild_id = $1 AND user_id = $2 AND died_at IS NULL`,
-      [guildId, userId]
+  ): Promise<PersonalMarimoStatus | null> {
+    const result = await this.pool.query<PersonalMarimoRow>(
+      `SELECT m.*, w.dialogue_id
+       FROM marimos m
+       LEFT JOIN marimo_waterings w
+         ON w.marimo_id = m.id AND w.watered_date = $3
+       WHERE m.guild_id = $1 AND m.user_id = $2 AND m.died_at IS NULL`,
+      [guildId, userId, jstDate(now)]
     );
     const row = result.rows[0];
     if (row === undefined) return null;
@@ -378,7 +409,8 @@ export class MarimoRepository {
     return {
       ...marimo,
       sizeMm: sizeAt(marimo.bornAt, now),
-      ageDays: ageDays(marimo.bornAt, now)
+      ageDays: ageDays(marimo.bornAt, now),
+      dialogueId: row.dialogue_id
     };
   }
 
@@ -735,6 +767,7 @@ export class MarimoRepository {
   public async pendingWateringLogs(limit = 25): Promise<PendingWateringLog[]> {
     const result = await this.pool.query<WateringLogRow>(
       `SELECT w.event_id, w.watered_at, w.watered_date, w.size_mm, w.is_birth,
+              w.dialogue_id,
               w.awarded_xp, w.log_delivery_attempts,
               m.id, m.guild_id, m.user_id, m.generation,
               m.owner_display_name, m.name, m.born_at,
@@ -758,6 +791,7 @@ export class MarimoRepository {
   ): Promise<Watering[]> {
     const result = await this.pool.query<WateringLogRow>(
       `SELECT w.event_id, w.watered_at, w.watered_date, w.size_mm, w.is_birth,
+              w.dialogue_id,
               w.awarded_xp, w.log_delivery_attempts,
               m.id, m.guild_id, m.user_id, m.generation,
               m.owner_display_name, m.name, m.born_at,

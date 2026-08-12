@@ -8,6 +8,74 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl === undefined ? describe.skip : describe;
 
 suite("database migration upgrade", () => {
+  it("keeps historical watering logs without retroactive dialogue", async () => {
+    const admin = new Pool({ connectionString: databaseUrl });
+    const schema = "marimo_dialogue_upgrade_test";
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`
+    });
+
+    try {
+      for (const migration of [
+        "001_initial.sql",
+        "002_watering_log_delivery.sql",
+        "003_xp_compensation.sql",
+        "004_watering_birth.sql",
+        "005_xp_delivery_fairness.sql",
+        "006_calendar_day_growth.sql",
+        "007_allowed_roles.sql",
+        "008_marimo_revival.sql",
+        "009_lower_revival_cost.sql"
+      ]) {
+        await pool.query(
+          await readFile(
+            resolve(process.cwd(), "migrations", migration),
+            "utf8"
+          )
+        );
+      }
+      const marimo = await pool.query<{ id: string }>(
+        `INSERT INTO marimos (
+           guild_id, user_id, generation, owner_display_name, name,
+           born_at, last_watered_at, last_watered_date
+         ) VALUES ('1001', '2001', 1, 'owner', 'まりも',
+                   '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10')
+         RETURNING id`
+      );
+      const marimoId = marimo.rows[0]?.id;
+      if (marimoId === undefined) throw new Error("expected marimo row");
+      const eventId = "00000000-0000-4000-8000-000000000101";
+      await pool.query(
+        `INSERT INTO marimo_waterings (
+           event_id, marimo_id, guild_id, user_id, channel_id,
+           watered_date, watered_at, size_mm, awarded_xp, is_birth
+         ) VALUES ($1, $2, '1001', '2001', '3001',
+                   '2026-08-10', '2026-08-10T03:00:00Z', 10, 100, TRUE)`,
+        [eventId, marimoId]
+      );
+
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "010_watering_dialogue.sql"),
+          "utf8"
+        )
+      );
+
+      const watering = await pool.query<{ dialogue_id: string | null }>(
+        "SELECT dialogue_id FROM marimo_waterings WHERE event_id = $1",
+        [eventId]
+      );
+      expect(watering.rows).toEqual([{ dialogue_id: null }]);
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
   it("adds one 90 XP compensation to an existing 10 XP watering", async () => {
     const admin = new Pool({ connectionString: databaseUrl });
     const schema = "marimo_migration_upgrade_test";
