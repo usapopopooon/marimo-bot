@@ -4,6 +4,7 @@ import {
   PermissionFlagsBits,
   PermissionsBitField,
   TextChannel,
+  type Client,
   type ChatInputCommandInteraction,
   type Interaction,
   type Message,
@@ -109,6 +110,12 @@ type WateringLogDeliverer = {
   postWateringLog(watering: Watering): Promise<void>;
 };
 
+type LiveLogPoster = {
+  client: Client;
+  postWateringLog(watering: Watering): Promise<void>;
+  postDeathLog(death: DeadMarimo): Promise<void>;
+};
+
 type WaterInteractionHarness = {
   deliverWateringLog(watering: Watering): Promise<void>;
   updateRankings(guildId: string, now: Date): Promise<void>;
@@ -121,9 +128,14 @@ type LogRefresher = {
   findMarimoLogs(channel: TextChannel, botUserId: string): Promise<Message[]>;
   postWateringLogToChannel(
     channel: TextChannel,
-    watering: Watering
+    watering: Watering,
+    options: { notifyOwner: boolean; deliveryKey?: string }
   ): Promise<void>;
-  postDeathLogToChannel(channel: TextChannel, death: DeadMarimo): Promise<void>;
+  postDeathLogToChannel(
+    channel: TextChannel,
+    death: DeadMarimo,
+    options: { notifyOwner: boolean; deliveryKey?: string }
+  ): Promise<void>;
 };
 
 type ClientAccessor = {
@@ -982,6 +994,64 @@ describe("panel interaction wiring", () => {
     expect(markWateringLogDelivered).toHaveBeenCalledWith(watering.eventId);
   });
 
+  it("notifies only the owner on live milestone and death logs", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const channel = textChannelWithSend(send);
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue({
+        ...guildConfig,
+        logChannelId: "3001"
+      })
+    }) as unknown as LiveLogPoster;
+    vi.spyOn(bot.client.channels, "fetch").mockResolvedValue(channel);
+
+    await bot.postWateringLog({ ...watering, ageDays: 2 });
+    await bot.postWateringLog({
+      ...watering,
+      eventId: "00000000-0000-4000-8000-000000000002",
+      ageDays: 4
+    });
+    await bot.postDeathLog(death);
+
+    const milestone = send.mock.calls[0]?.[0] as {
+      content: string;
+      allowedMentions: { parse: string[]; users?: string[] };
+      nonce?: string;
+      enforceNonce?: boolean;
+    };
+    expect(milestone.content).toContain("連続飼育 2日達成");
+    expect(milestone.allowedMentions).toEqual({
+      parse: [],
+      users: ["2001"]
+    });
+    expect(milestone.nonce).toHaveLength(25);
+    expect(milestone.enforceNonce).toBe(true);
+
+    const ordinary = send.mock.calls[1]?.[0] as {
+      content: string;
+      allowedMentions: { parse: string[]; users?: string[] };
+      nonce?: string;
+    };
+    expect(ordinary.content).not.toContain("達成");
+    expect(ordinary.allowedMentions).toEqual({ parse: [] });
+    expect(ordinary.nonce).not.toBe(milestone.nonce);
+
+    const memorial = send.mock.calls[2]?.[0] as {
+      content: string;
+      allowedMentions: { parse: string[]; users?: string[] };
+      nonce?: string;
+      enforceNonce?: boolean;
+    };
+    expect(memorial.content).toContain("枯れてしまいました");
+    expect(memorial.allowedMentions).toEqual({
+      parse: [],
+      users: ["2001"]
+    });
+    expect(memorial.nonce).toHaveLength(25);
+    expect(memorial.nonce).not.toBe(milestone.nonce);
+    expect(memorial.enforceNonce).toBe(true);
+  });
+
   it("reposts the complete event history without a completion announcement", async () => {
     const laterWatering: Watering = {
       ...watering,
@@ -1027,13 +1097,17 @@ describe("panel interaction wiring", () => {
     expect(postWateringLogToChannel).toHaveBeenNthCalledWith(
       1,
       channel,
-      watering
+      watering,
+      { notifyOwner: false }
     );
-    expect(postDeathLogToChannel).toHaveBeenCalledWith(channel, death);
+    expect(postDeathLogToChannel).toHaveBeenCalledWith(channel, death, {
+      notifyOwner: false
+    });
     expect(postWateringLogToChannel).toHaveBeenNthCalledWith(
       2,
       channel,
-      laterWatering
+      laterWatering,
+      { notifyOwner: false }
     );
     expect(postWateringLogToChannel.mock.invocationCallOrder[0]).toBeLessThan(
       postDeathLogToChannel.mock.invocationCallOrder[0] ??

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RankingEntry } from "../domain/types.js";
 import {
   deathLogContent,
+  isCareStreakMilestone,
   nameModal,
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
@@ -32,6 +33,23 @@ function entry(userId: string, age: number, size: number): RankingEntry {
 }
 
 describe("Discord presentation", () => {
+  it.each([
+    [1, false],
+    [2, true],
+    [3, true],
+    [4, false],
+    [5, true],
+    [6, false],
+    [9, false],
+    [10, true],
+    [11, false],
+    [19, false],
+    [20, true],
+    [100, true]
+  ])("classifies a %i-day care streak milestone", (ageDays, expected) => {
+    expect(isCareStreakMilestone(ageDays)).toBe(expected);
+  });
+
   it("explains the hard reset and exact daily XP", () => {
     const panel = waterPanel(100);
     const embed = panel.embeds[0]?.toJSON();
@@ -182,6 +200,27 @@ describe("Discord presentation", () => {
     expect(care).toContain("<@new-owner>");
     expect(birth).not.toContain("https://");
     expect(care).not.toContain("https://");
+  });
+
+  it("adds a celebration only to milestone watering logs", () => {
+    const marimo = entry("owner", 2, 10.3);
+    const base = {
+      eventId: "00000000-0000-4000-8000-000000000001",
+      marimo,
+      wateredAt: new Date("2026-08-11T00:00:00Z"),
+      wateredDate: "2026-08-11",
+      sizeMm: 10.3,
+      awardedXp: 110,
+      isBirth: false
+    };
+
+    const milestone = wateringLogContent({ ...base, ageDays: 2 });
+    const ordinary = wateringLogContent({ ...base, ageDays: 4 });
+
+    expect(milestone).toContain("🎉 **連続飼育 2日達成！**");
+    expect(milestone).toContain("おめでとうございます！");
+    expect(ordinary).not.toContain("🎉");
+    expect(ordinary).not.toContain("おめでとうございます");
   });
 
   it("keeps Discord user mention syntax without URL links in death logs", () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   AttachmentBuilder,
   Client,
@@ -35,6 +36,7 @@ import { commands } from "./commands.js";
 import {
   deathLogContent,
   displayMarimoName,
+  isCareStreakMilestone,
   nameModal,
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
@@ -74,6 +76,15 @@ function configuredChannel(
 }
 
 const MARIMO_LOG_FILES = new Set(["marimo-tank.png", "marimo-memorial.png"]);
+
+type LogPostOptions = {
+  notifyOwner: boolean;
+  deliveryKey?: string;
+};
+
+function logNonce(deliveryKey: string): string {
+  return createHash("sha256").update(deliveryKey).digest("hex").slice(0, 25);
+}
 
 export function isMarimoImageLog(message: Message, botUserId: string): boolean {
   return (
@@ -845,11 +856,15 @@ export class MarimoBot {
     const history = [
       ...waterings.map((watering) => ({
         at: watering.wateredAt,
-        post: () => this.postWateringLogToChannel(channel, watering)
+        post: () =>
+          this.postWateringLogToChannel(channel, watering, {
+            notifyOwner: false
+          })
       })),
       ...deaths.map((death) => ({
         at: death.diedAt,
-        post: () => this.postDeathLogToChannel(channel, death)
+        post: () =>
+          this.postDeathLogToChannel(channel, death, { notifyOwner: false })
       }))
     ].sort((left, right) => left.at.getTime() - right.at.getTime());
     for (const event of history) {
@@ -1043,22 +1058,33 @@ export class MarimoBot {
     if (!(channel instanceof TextChannel)) {
       throw new Error("Configured watering log channel is unavailable");
     }
-    await this.postWateringLogToChannel(channel, watering);
+    await this.postWateringLogToChannel(channel, watering, {
+      notifyOwner: isCareStreakMilestone(watering.ageDays),
+      deliveryKey: `watering:${watering.eventId}`
+    });
   }
 
   private async postWateringLogToChannel(
     channel: TextChannel,
-    watering: Watering
+    watering: Watering,
+    options: LogPostOptions
   ): Promise<void> {
     const image = await renderLivingTankImage({
       ...watering.marimo,
       sizeMm: watering.sizeMm,
       ageDays: watering.ageDays
     });
+    const nonce =
+      options.deliveryKey === undefined
+        ? undefined
+        : logNonce(options.deliveryKey);
     await channel.send({
       content: wateringLogContent(watering),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
-      allowedMentions: { parse: [] }
+      allowedMentions: options.notifyOwner
+        ? { parse: [], users: [watering.marimo.userId] }
+        : { parse: [] },
+      ...(nonce === undefined ? {} : { nonce, enforceNonce: true })
     });
   }
 
@@ -1091,12 +1117,16 @@ export class MarimoBot {
     if (config.logChannelId === null) return;
     const channel = await this.client.channels.fetch(config.logChannelId);
     if (!(channel instanceof TextChannel)) return;
-    await this.postDeathLogToChannel(channel, death);
+    await this.postDeathLogToChannel(channel, death, {
+      notifyOwner: true,
+      deliveryKey: `death:${death.id}:${death.diedAt.toISOString()}`
+    });
   }
 
   private async postDeathLogToChannel(
     channel: TextChannel,
-    death: DeadMarimo
+    death: DeadMarimo,
+    options: LogPostOptions
   ): Promise<void> {
     const image = await renderTankImage({
       seed: `${death.guildId}:${death.userId}:${death.generation}`,
@@ -1109,10 +1139,17 @@ export class MarimoBot {
       ),
       dead: true
     });
+    const nonce =
+      options.deliveryKey === undefined
+        ? undefined
+        : logNonce(options.deliveryKey);
     await channel.send({
       content: deathLogContent(death),
       files: [new AttachmentBuilder(image, { name: "marimo-memorial.png" })],
-      allowedMentions: { parse: [] }
+      allowedMentions: options.notifyOwner
+        ? { parse: [], users: [death.userId] }
+        : { parse: [] },
+      ...(nonce === undefined ? {} : { nonce, enforceNonce: true })
     });
   }
 

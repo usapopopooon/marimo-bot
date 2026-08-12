@@ -25,6 +25,14 @@ export const REVIVE_BUTTON_ID = "marimo:revive";
 export const NAME_MODAL_ID = "marimo:name-modal";
 export const NAME_INPUT_ID = "marimo:name-input";
 const MARIMO_GREEN = 0x20a51f;
+const EARLY_CARE_STREAK_MILESTONES = new Set([2, 3, 5]);
+
+export function isCareStreakMilestone(ageDays: number): boolean {
+  return (
+    EARLY_CARE_STREAK_MILESTONES.has(ageDays) ||
+    (ageDays >= 10 && ageDays % 10 === 0)
+  );
+}
 
 export function displayMarimoName(name: string): string {
   return escapeMarkdown(name);
@@ -165,11 +173,20 @@ export function statusContent(
 }
 
 export function wateringLogContent(watering: Watering): string {
+  const celebration =
+    !watering.isBirth && isCareStreakMilestone(watering.ageDays)
+      ? [
+          "",
+          `🎉 **連続飼育 ${watering.ageDays}日達成！**`,
+          "おめでとうございます！"
+        ]
+      : [];
   return [
     watering.isBirth
       ? `🟢 ${ownerMention(watering.marimo.userId)} の **${displayMarimoName(watering.marimo.name)}** が生まれました`
       : `🫧 ${ownerMention(watering.marimo.userId)} が **${displayMarimoName(watering.marimo.name)}** の水を替えました`,
-    `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`
+    `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`,
+    ...celebration
   ].join("\n");
 }
 
