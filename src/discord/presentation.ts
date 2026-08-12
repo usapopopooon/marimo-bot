@@ -49,7 +49,7 @@ export function waterPanel(waterXp: number): {
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(STATUS_BUTTON_ID)
-      .setLabel("自分のまりも")
+      .setLabel("自分のまりもを見る")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(NAME_BUTTON_ID)

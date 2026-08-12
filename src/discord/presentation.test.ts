@@ -8,6 +8,7 @@ import {
   NAME_MODAL_ID,
   rankingPanel,
   REVIVE_BUTTON_ID,
+  STATUS_BUTTON_ID,
   statusContent,
   wateringLogContent,
   waterPanel,
@@ -69,6 +70,14 @@ describe("Discord presentation", () => {
       expect.objectContaining({
         custom_id: WATER_BUTTON_ID,
         label: "育て始める・水を替える"
+      })
+    );
+    expect(
+      panel.components[0]?.components.map((component) => component.toJSON())
+    ).toContainEqual(
+      expect.objectContaining({
+        custom_id: STATUS_BUTTON_ID,
+        label: "自分のまりもを見る"
       })
     );
     expect(

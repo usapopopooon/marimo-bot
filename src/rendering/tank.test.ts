@@ -1,6 +1,10 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { marimoRadiusForSize, renderTankImage } from "./tank.js";
+import {
+  livingTankImageInput,
+  marimoRadiusForSize,
+  renderTankImage
+} from "./tank.js";
 
 describe("tank image", () => {
   it("renders a Discord-friendly landscape PNG", async () => {
@@ -31,5 +35,27 @@ describe("tank image", () => {
     const radii = boundarySizes.map(marimoRadiusForSize);
     expect(radii).toEqual([...radii].sort((left, right) => left - right));
     expect(marimoRadiusForSize(1_000_000)).toBe(1_000_000);
+  });
+
+  it("maps a living marimo to the same image inputs used by watering logs", () => {
+    expect(
+      livingTankImageInput({
+        id: "1",
+        guildId: "1001",
+        userId: "2001",
+        generation: 3,
+        ownerDisplayName: "owner",
+        name: "まりも",
+        bornAt: new Date("2026-08-10T00:00:00Z"),
+        lastWateredAt: new Date("2026-08-12T00:00:00Z"),
+        lastWateredDate: "2026-08-12",
+        sizeMm: 10.6,
+        ageDays: 3
+      })
+    ).toEqual({
+      seed: "1001:2001:3",
+      sizeMm: 10.6,
+      ageDays: 3
+    });
   });
 });

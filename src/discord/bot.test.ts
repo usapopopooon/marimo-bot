@@ -376,6 +376,87 @@ describe("panel interaction wiring", () => {
     expect(showModal).toHaveBeenCalledOnce();
   });
 
+  it("shows the current tank image only to the owner from the panel channel", async () => {
+    const getLiving = vi.fn().mockResolvedValue(living);
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(
+      botWith({
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        getLiving
+      }),
+      {
+        isButton: () => true,
+        customId: STATUS_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([]),
+        deferReply,
+        editReply
+      }
+    );
+
+    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(getLiving).toHaveBeenCalledWith("1001", "2001", expect.any(Date));
+    expect(editReply).toHaveBeenCalledOnce();
+    const reply = editReply.mock.calls[0]?.[0] as
+      | {
+          content: string;
+          files: {
+            attachment: unknown;
+            name: string | null;
+          }[];
+        }
+      | undefined;
+    expect(reply?.content).toContain("# 🟢 まりも");
+    expect(reply?.content).toContain("大きさ **10.00 mm**");
+    expect(reply?.files).toHaveLength(1);
+    expect(reply?.files[0]?.name).toBe("marimo-tank.png");
+    expect(Buffer.isBuffer(reply?.files[0]?.attachment)).toBe(true);
+  });
+
+  it("keeps the personal status private when no living marimo exists", async () => {
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(
+      botWith({
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        getLiving: vi.fn().mockResolvedValue(null)
+      }),
+      {
+        isButton: () => true,
+        customId: STATUS_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([]),
+        deferReply,
+        editReply
+      }
+    );
+
+    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(editReply).toHaveBeenCalledWith({
+      content:
+        "生きているまりもはいません。「育て始める・水を替える」から始めましょう。"
+    });
+  });
+
   it("rejects a copied or superseded panel before changing data", async () => {
     const getLiving = vi.fn().mockResolvedValue(living);
     const reply = vi.fn().mockResolvedValue(undefined);

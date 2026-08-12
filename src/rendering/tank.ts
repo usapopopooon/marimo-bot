@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import type { RankingEntry } from "../domain/types.js";
 
 export type TankImageInput = {
   seed: string;
@@ -11,6 +12,20 @@ export function marimoRadiusForSize(sizeMm: number): number {
   // 初代まりもちゃんと同様に、実サイズがそのまま画面上の大きさになる。
   // 上限を設けず、長く育てると画面からはみ出すことも成長の記録とする。
   return Math.max(7, sizeMm);
+}
+
+export function livingTankImageInput(entry: RankingEntry): TankImageInput {
+  return {
+    seed: `${entry.guildId}:${entry.userId}:${entry.generation}`,
+    sizeMm: entry.sizeMm,
+    ageDays: entry.ageDays
+  };
+}
+
+export async function renderLivingTankImage(
+  entry: RankingEntry
+): Promise<Buffer> {
+  return renderTankImage(livingTankImageInput(entry));
 }
 
 export async function renderTankImage(input: TankImageInput): Promise<Buffer> {

@@ -26,7 +26,7 @@ import type {
   Watering
 } from "../domain/types.js";
 import { REVIVAL_COST_XP, wateringXp } from "../domain/rewards.js";
-import { renderTankImage } from "../rendering/tank.js";
+import { renderLivingTankImage, renderTankImage } from "../rendering/tank.js";
 import type {
   RevivalSpendResult,
   XpDelivery
@@ -516,18 +516,24 @@ export class MarimoBot {
       });
       return;
     }
+    await interaction.deferReply({ ephemeral: true });
     const now = new Date();
     const entry = await this.repository.getLiving(
       interaction.guildId,
       interaction.user.id,
       now
     );
-    await interaction.reply({
-      content:
-        entry === null
-          ? "生きているまりもはいません。「育て始める・水を替える」から始めましょう。"
-          : statusContent(entry, this.config.WATER_XP, now),
-      ephemeral: true
+    if (entry === null) {
+      await interaction.editReply({
+        content:
+          "生きているまりもはいません。「育て始める・水を替える」から始めましょう。"
+      });
+      return;
+    }
+    const image = await renderLivingTankImage(entry);
+    await interaction.editReply({
+      content: statusContent(entry, this.config.WATER_XP, now),
+      files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })]
     });
   }
 
@@ -1044,8 +1050,8 @@ export class MarimoBot {
     channel: TextChannel,
     watering: Watering
   ): Promise<void> {
-    const image = await renderTankImage({
-      seed: `${watering.marimo.guildId}:${watering.marimo.userId}:${watering.marimo.generation}`,
+    const image = await renderLivingTankImage({
+      ...watering.marimo,
       sizeMm: watering.sizeMm,
       ageDays: watering.ageDays
     });
