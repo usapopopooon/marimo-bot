@@ -400,6 +400,7 @@ describe("panel interaction wiring", () => {
   it("shows the current tank image only to the owner from the panel channel", async () => {
     const getLiving = vi.fn().mockResolvedValue({
       ...living,
+      name: "まるぽん",
       dialogueId: "everyday-01-01"
     });
     const deferReply = vi.fn().mockResolvedValue(undefined);
@@ -440,10 +441,10 @@ describe("panel interaction wiring", () => {
           }[];
         }
       | undefined;
-    expect(reply?.content).toContain("# 🟢 まりも");
+    expect(reply?.content).toContain("# 🟢 まるぽん");
     expect(reply?.content).toContain("大きさ **10.00 mm**");
     expect(reply?.content).toContain(
-      "> 🟢 まりも「お水がきらきらして、ゆっくり丸くなれそう。」"
+      "> 🟢 まるぽん「お水、きらきら。いい感じ。とりあえず、ころん。」"
     );
     expect(reply?.files).toHaveLength(1);
     expect(reply?.files[0]?.name).toBe("marimo-tank.png");

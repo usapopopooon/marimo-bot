@@ -26,6 +26,14 @@ describe("marimo dialogue", () => {
     }
   });
 
+  it("keeps the voice casual instead of romantic or theatrical", () => {
+    for (const line of MARIMO_DIALOGUES) {
+      expect(line.text).not.toMatch(
+        /あなた|宝物|きずな|しあわせ|幸せ|胸のあたり|大切な思い出|ぬくもり/
+      );
+    }
+  });
+
   it("uses dialogue suited to births, early care, and milestones", () => {
     const birth = selectMarimoDialogue({
       ...ordinaryContext,

@@ -292,8 +292,8 @@ describe("Discord presentation", () => {
     const spoken = wateringLogContent({ ...base, dialogueId });
     const historical = wateringLogContent({ ...base, dialogueId: null });
 
-    expect(spoken).toContain(`> 🟢 まりも「${dialogue}」`);
-    expect(historical).not.toContain("> 🟢 まりも「");
+    expect(spoken).toContain(`> 🟢 ownerのまりも「${dialogue}」`);
+    expect(historical).not.toContain(`> 🟢 ownerのまりも「`);
   });
 
   it("keeps Discord user mention syntax without URL links in death logs", () => {
@@ -344,8 +344,36 @@ describe("Discord presentation", () => {
       null
     );
 
-    expect(status).toContain(`> 🟢 まりも「${dialogue}」`);
-    expect(withoutTodayDialogue).not.toContain("> 🟢 まりも「");
+    expect(status).toContain(`> 🟢 ownerのまりも「${dialogue}」`);
+    expect(withoutTodayDialogue).not.toContain(`> 🟢 ownerのまりも「`);
+  });
+
+  it("uses the escaped user-defined name as the dialogue speaker", () => {
+    const marimo = { ...entry("owner", 4, 10.9), name: "**まるぽん**" };
+    const dialogueId = "everyday-01-01";
+    const dialogue = marimoDialogueText(dialogueId);
+    expect(dialogue).not.toBeNull();
+
+    const status = statusContent(
+      marimo,
+      100,
+      new Date("2026-08-13T03:00:00Z"),
+      dialogueId
+    );
+    const watering = wateringLogContent({
+      eventId: "00000000-0000-4000-8000-000000000002",
+      marimo,
+      wateredAt: new Date("2026-08-13T03:00:00Z"),
+      wateredDate: "2026-08-13",
+      sizeMm: 10.9,
+      ageDays: 4,
+      awardedXp: 130,
+      isBirth: false,
+      dialogueId
+    });
+
+    expect(status).toContain(`> 🟢 \\*\\*まるぽん\\*\\*「${dialogue}」`);
+    expect(watering).toContain(`> 🟢 \\*\\*まるぽん\\*\\*「${dialogue}」`);
   });
 
   it("escapes formatting characters in user-defined marimo names", () => {

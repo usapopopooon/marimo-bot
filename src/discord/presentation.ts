@@ -203,7 +203,9 @@ export function statusContent(
     `大きさ **${entry.sizeMm.toFixed(2)} mm**`,
     `最後の水替え **${entry.lastWateredDate}**`,
     `次の水替え **${wateringXp(baseXp, nextCareDay)} XP**`,
-    ...(dialogue === null ? [] : ["", `> 🟢 まりも「${dialogue}」`]),
+    ...(dialogue === null
+      ? []
+      : ["", `> 🟢 ${displayMarimoName(entry.name)}「${dialogue}」`]),
     "",
     "-# 水を替えない日が丸一日続くと枯れてしまいます"
   ].join("\n");
@@ -225,7 +227,9 @@ export function wateringLogContent(watering: Watering): string {
       : `🫧 ${ownerMention(watering.marimo.userId)} が **${displayMarimoName(watering.marimo.name)}** の水を替えました`,
     `第${watering.marimo.generation}世代｜生後 **${watering.ageDays}日**｜**${watering.sizeMm.toFixed(2)} mm**｜**+${watering.awardedXp} XP**`,
     ...celebration,
-    ...(dialogue === null ? [] : ["", `> 🟢 まりも「${dialogue}」`])
+    ...(dialogue === null
+      ? []
+      : ["", `> 🟢 ${displayMarimoName(watering.marimo.name)}「${dialogue}」`])
   ].join("\n");
 }
 
