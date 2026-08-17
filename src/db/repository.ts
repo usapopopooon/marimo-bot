@@ -7,11 +7,13 @@ import {
   deathAt,
   isDead,
   jstDate,
+  jstHour,
   revivedBornAt,
   sizeAt
 } from "../domain/time.js";
 import type {
   DeadMarimo,
+  DueWateringReminder,
   GuildConfig,
   LivingMarimo,
   PanelKind,
@@ -22,6 +24,7 @@ import type {
   RevivalPreparation,
   Watering,
   WaterResult,
+  WateringReminderHour,
   XpAward
 } from "../domain/types.js";
 
@@ -78,6 +81,15 @@ type RevivalRow = DeadMarimoRow & {
   status: "pending" | "completed";
   requested_at: Date;
   revived_at: Date | null;
+};
+
+type WateringReminderRow = QueryResultRow & {
+  guild_id: string;
+  user_id: string;
+  name: string;
+  log_channel_id: string;
+  reminder_hour: number;
+  reminder_date: string | Date;
 };
 
 const panelColumns: Record<PanelKind, { channel: string; message: string }> = {
@@ -154,6 +166,11 @@ function firstRow<T>(rows: T[], context: string): T {
   const row = rows[0];
   if (row === undefined) throw new Error(`${context} returned no row`);
   return row;
+}
+
+function wateringReminderHour(value: number): WateringReminderHour {
+  if (value === 8 || value === 12 || value === 18 || value === 21) return value;
+  throw new Error(`Invalid watering reminder hour: ${value}`);
 }
 
 export class MarimoRepository {
@@ -702,6 +719,143 @@ export class MarimoRepository {
       deadPanelChannelId: null,
       deadPanelMessageId: null
     };
+  }
+
+  public async getWateringReminderHour(
+    guildId: string,
+    userId: string
+  ): Promise<WateringReminderHour | null> {
+    const result = await this.pool.query<{ reminder_hour: number }>(
+      `SELECT reminder_hour
+       FROM marimo_watering_reminder_preferences
+       WHERE guild_id = $1 AND user_id = $2 AND enabled`,
+      [guildId, userId]
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : wateringReminderHour(row.reminder_hour);
+  }
+
+  public async setWateringReminderHour(
+    guildId: string,
+    userId: string,
+    hour: WateringReminderHour | null
+  ): Promise<void> {
+    if (hour === null) {
+      await this.pool.query(
+        `INSERT INTO marimo_watering_reminder_preferences (
+           guild_id, user_id, enabled
+         ) VALUES ($1, $2, FALSE)
+         ON CONFLICT (guild_id, user_id) DO UPDATE SET
+           enabled = FALSE, updated_at = NOW()`,
+        [guildId, userId]
+      );
+      return;
+    }
+    await this.pool.query(
+      `INSERT INTO marimo_watering_reminder_preferences (
+         guild_id, user_id, enabled, reminder_hour
+       ) VALUES ($1, $2, TRUE, $3)
+       ON CONFLICT (guild_id, user_id) DO UPDATE SET
+         enabled = TRUE, reminder_hour = EXCLUDED.reminder_hour,
+         updated_at = NOW()`,
+      [guildId, userId, hour]
+    );
+  }
+
+  public async claimDueWateringReminders(
+    now: Date,
+    limit = 100
+  ): Promise<DueWateringReminder[]> {
+    const today = jstDate(now);
+    const result = await this.pool.query<WateringReminderRow>(
+      `WITH due AS (
+         SELECT preference.guild_id, preference.user_id,
+                preference.reminder_hour, config.log_channel_id,
+                marimo.name
+         FROM marimo_watering_reminder_preferences AS preference
+         JOIN marimos AS marimo
+           ON marimo.guild_id = preference.guild_id
+          AND marimo.user_id = preference.user_id
+          AND marimo.died_at IS NULL
+         JOIN marimo_guild_configs AS config
+           ON config.guild_id = preference.guild_id
+          AND config.log_channel_id IS NOT NULL
+         WHERE preference.enabled
+           AND preference.reminder_hour <= $2
+           AND preference.last_notified_date IS DISTINCT FROM $1::date
+           AND (
+             preference.last_attempt_date IS DISTINCT FROM $1::date
+             OR preference.delivery_attempts < 5
+           )
+           AND marimo.last_watered_date < $1::date
+           AND marimo.last_watered_date + 2 > $1::date
+         ORDER BY preference.reminder_hour, preference.guild_id,
+                  preference.user_id
+         FOR UPDATE OF preference SKIP LOCKED
+         LIMIT $3
+       )
+       UPDATE marimo_watering_reminder_preferences AS preference
+       SET last_notified_date = $1::date,
+           last_attempt_date = $1::date,
+           delivery_attempts = CASE
+             WHEN preference.last_attempt_date = $1::date
+               THEN preference.delivery_attempts + 1
+             ELSE 1
+           END,
+           updated_at = NOW()
+       FROM due
+       WHERE preference.guild_id = due.guild_id
+         AND preference.user_id = due.user_id
+       RETURNING due.guild_id, due.user_id, due.name,
+                 due.log_channel_id, due.reminder_hour,
+                 $1::date AS reminder_date`,
+      [today, jstHour(now), limit]
+    );
+    return result.rows.map((row) => ({
+      guildId: row.guild_id,
+      userId: row.user_id,
+      marimoName: row.name,
+      logChannelId: row.log_channel_id,
+      reminderHour: wateringReminderHour(row.reminder_hour),
+      reminderDate: dateString(row.reminder_date)
+    }));
+  }
+
+  public async wateringReminderStillDue(
+    guildId: string,
+    userId: string,
+    reminderDate: string
+  ): Promise<boolean> {
+    const result = await this.pool.query<{ exists: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1
+         FROM marimo_watering_reminder_preferences AS preference
+         JOIN marimos AS marimo
+           ON marimo.guild_id = preference.guild_id
+          AND marimo.user_id = preference.user_id
+          AND marimo.died_at IS NULL
+         WHERE preference.guild_id = $1 AND preference.user_id = $2
+           AND preference.enabled
+           AND marimo.last_watered_date < $3::date
+           AND marimo.last_watered_date + 2 > $3::date
+       ) AS exists`,
+      [guildId, userId, reminderDate]
+    );
+    return result.rows[0]?.exists === true;
+  }
+
+  public async releaseWateringReminderClaim(
+    guildId: string,
+    userId: string,
+    reminderDate: string
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_watering_reminder_preferences
+       SET last_notified_date = NULL, updated_at = NOW()
+       WHERE guild_id = $1 AND user_id = $2
+         AND last_notified_date = $3::date`,
+      [guildId, userId, reminderDate]
+    );
   }
 
   public async allowedRoleIds(guildId: string): Promise<string[]> {

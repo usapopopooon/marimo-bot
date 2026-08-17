@@ -20,7 +20,7 @@ describe("Discord commands", () => {
     const commandJson = JSON.stringify(commands);
 
     expect(commandJson).toContain(
-      '"name":"log","description":"実行したチャンネルを画像ログの投稿先に設定"'
+      '"name":"log","description":"実行したチャンネルをまりもログと通知の投稿先に設定"'
     );
     expect(commandJson).not.toContain('"name":"channel"');
     expect(commandJson).toContain(

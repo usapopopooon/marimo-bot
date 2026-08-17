@@ -29,6 +29,9 @@ import {
 import {
   NAME_BUTTON_ID,
   NAME_MODAL_ID,
+  REMINDER_BUTTON_ID,
+  REMINDER_HOUR_BUTTON_PREFIX,
+  REMINDER_OFF_BUTTON_ID,
   REVIVE_BUTTON_ID,
   STATUS_BUTTON_ID,
   WATER_BUTTON_ID
@@ -125,6 +128,11 @@ type LiveLogPoster = {
   postDeathLog(death: DeadMarimo): Promise<void>;
 };
 
+type ReminderDeliverer = {
+  client: Client;
+  deliverDueWateringReminders(now: Date): Promise<void>;
+};
+
 type WaterInteractionHarness = {
   deliverWateringLog(watering: Watering): Promise<void>;
   updateRankings(guildId: string, now: Date): Promise<void>;
@@ -167,6 +175,7 @@ function botWith(
   return new MarimoBot(
     {
       allowedRoleIds: vi.fn().mockResolvedValue([]),
+      getWateringReminderHour: vi.fn().mockResolvedValue(null),
       ...repository
     } as MarimoRepository,
     xpDelivery as XpDelivery,
@@ -330,7 +339,10 @@ describe("panel interaction wiring", () => {
       WATER_BUTTON_ID,
       STATUS_BUTTON_ID,
       NAME_BUTTON_ID,
-      REVIVE_BUTTON_ID
+      REVIVE_BUTTON_ID,
+      REMINDER_BUTTON_ID,
+      REMINDER_OFF_BUTTON_ID,
+      `${REMINDER_HOUR_BUTTON_PREFIX}21`
     ]) {
       const reply = vi.fn().mockResolvedValue(undefined);
       await dispatch(botWith(repository), {
@@ -443,6 +455,7 @@ describe("panel interaction wiring", () => {
       | undefined;
     expect(reply?.content).toContain("# 🟢 まるぽん");
     expect(reply?.content).toContain("大きさ **10.00 mm**");
+    expect(reply?.content).toContain("水換え通知 **OFF**");
     expect(reply?.content).toContain(
       "> 🟢 まるぽん「本日の予定：光合成、休憩、光合成。きょうも、だいたいいつもどおりです。」"
     );
@@ -483,6 +496,92 @@ describe("panel interaction wiring", () => {
       content:
         "生きているまりもはいません。「育て始める・水を替える」から始めましょう。"
     });
+  });
+
+  it("opens the owner's opt-in reminder settings from the current panel", async () => {
+    const getWateringReminderHour = vi.fn().mockResolvedValue(null);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(
+      botWith({
+        getConfig: vi.fn().mockResolvedValue({
+          ...guildConfig,
+          waterPanelChannelId: "3001",
+          waterPanelMessageId: "4001"
+        }),
+        getWateringReminderHour
+      }),
+      {
+        isButton: () => true,
+        customId: REMINDER_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([]),
+        reply
+      }
+    );
+
+    expect(getWateringReminderHour).toHaveBeenCalledWith("1001", "2001");
+    const payload = reply.mock.calls[0]?.[0] as
+      | {
+          content: string;
+          ephemeral: boolean;
+          components: unknown[];
+          allowedMentions: { parse: string[] };
+        }
+      | undefined;
+    expect(payload?.content).toContain("現在: **OFF**");
+    expect(payload?.ephemeral).toBe(true);
+    expect(payload?.components).toHaveLength(1);
+    expect(payload?.allowedMentions).toEqual({ parse: [] });
+  });
+
+  it("updates reminder time and OFF without requiring another panel post", async () => {
+    const setWateringReminderHour = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith({ setWateringReminderHour });
+    const enabledUpdate = vi.fn().mockResolvedValue(undefined);
+    const disabledUpdate = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: `${REMINDER_HOUR_BUTTON_PREFIX}18`,
+      guildId: "1001",
+      user: { id: "2001" },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      update: enabledUpdate
+    });
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: REMINDER_OFF_BUTTON_ID,
+      guildId: "1001",
+      user: { id: "2001" },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      update: disabledUpdate
+    });
+
+    expect(setWateringReminderHour).toHaveBeenNthCalledWith(
+      1,
+      "1001",
+      "2001",
+      18
+    );
+    expect(setWateringReminderHour).toHaveBeenNthCalledWith(
+      2,
+      "1001",
+      "2001",
+      null
+    );
+    const enabledPayload = enabledUpdate.mock.calls[0]?.[0] as
+      { content: string } | undefined;
+    const disabledPayload = disabledUpdate.mock.calls[0]?.[0] as
+      { content: string } | undefined;
+    expect(enabledPayload?.content).toContain("毎日 **18:00（日本時間）**");
+    expect(disabledPayload?.content).toContain("現在: **OFF**");
   });
 
   it("rejects a copied or superseded panel before changing data", async () => {
@@ -977,7 +1076,7 @@ describe("panel interaction wiring", () => {
     );
   });
 
-  it("uses the command channel as the image log channel", async () => {
+  it("uses the command channel for marimo logs and reminders", async () => {
     const setLogChannel = vi.fn().mockResolvedValue(undefined);
     const reply = vi.fn().mockResolvedValue(undefined);
 
@@ -1002,7 +1101,7 @@ describe("panel interaction wiring", () => {
 
     expect(setLogChannel).toHaveBeenCalledWith("1001", "3001");
     expect(reply).toHaveBeenCalledWith({
-      content: "画像ログの投稿先を <#3001> に設定しました。",
+      content: "まりもログと水替え通知の投稿先を <#3001> に設定しました。",
       ephemeral: true
     });
   });
@@ -1152,6 +1251,80 @@ describe("panel interaction wiring", () => {
     expect(memorial.nonce).toHaveLength(25);
     expect(memorial.nonce).not.toBe(milestone.nonce);
     expect(memorial.enforceNonce).toBe(true);
+  });
+
+  it("posts an opted-in missed-care reminder only in the configured log channel", async () => {
+    const reminder = {
+      guildId: "1001",
+      userId: "2001",
+      marimoName: "まりも",
+      logChannelId: "log-channel",
+      reminderHour: 21 as const,
+      reminderDate: "2026-08-11"
+    };
+    const claimDueWateringReminders = vi.fn().mockResolvedValue([reminder]);
+    const wateringReminderStillDue = vi.fn().mockResolvedValue(true);
+    const releaseWateringReminderClaim = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith({
+      claimDueWateringReminders,
+      wateringReminderStillDue,
+      releaseWateringReminderClaim
+    }) as unknown as ReminderDeliverer;
+    const send = vi.fn().mockResolvedValue(undefined);
+    const fetchChannel = vi
+      .spyOn(bot.client.channels, "fetch")
+      .mockResolvedValue(textChannelWithSend(send));
+    const now = new Date("2026-08-11T12:00:00Z");
+
+    await bot.deliverDueWateringReminders(now);
+
+    expect(claimDueWateringReminders).toHaveBeenCalledWith(now);
+    expect(wateringReminderStillDue).toHaveBeenCalledWith(
+      "1001",
+      "2001",
+      "2026-08-11"
+    );
+    expect(fetchChannel).toHaveBeenCalledWith("log-channel");
+    const payload = send.mock.calls[0]?.[0] as {
+      content: string;
+      allowedMentions: { parse: string[]; users: string[] };
+      nonce: string;
+      enforceNonce: boolean;
+    };
+    expect(payload.content).toContain("<@2001> さん");
+    expect(payload.content).toContain("まりも** が、ぷかぷか待っています");
+    expect(payload.allowedMentions).toEqual({ parse: [], users: ["2001"] });
+    expect(payload.nonce).toHaveLength(25);
+    expect(payload.enforceNonce).toBe(true);
+    expect(releaseWateringReminderClaim).not.toHaveBeenCalled();
+  });
+
+  it("releases a failed reminder claim so its finite retry budget can continue", async () => {
+    const reminder = {
+      guildId: "1001",
+      userId: "2001",
+      marimoName: "まりも",
+      logChannelId: "log-channel",
+      reminderHour: 21 as const,
+      reminderDate: "2026-08-11"
+    };
+    const releaseWateringReminderClaim = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith({
+      claimDueWateringReminders: vi.fn().mockResolvedValue([reminder]),
+      wateringReminderStillDue: vi.fn().mockResolvedValue(true),
+      releaseWateringReminderClaim
+    }) as unknown as ReminderDeliverer;
+    vi.spyOn(bot.client.channels, "fetch").mockResolvedValue(
+      textChannelWithSend(vi.fn().mockRejectedValue(new Error("send failed")))
+    );
+
+    await bot.deliverDueWateringReminders(new Date("2026-08-11T12:00:00Z"));
+
+    expect(releaseWateringReminderClaim).toHaveBeenCalledWith(
+      "1001",
+      "2001",
+      "2026-08-11"
+    );
   });
 
   it("reposts the complete event history without a completion announcement", async () => {

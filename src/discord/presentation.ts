@@ -20,12 +20,22 @@ import {
   wateringXp
 } from "../domain/rewards.js";
 import { jstDate } from "../domain/time.js";
-import type { DeadMarimo, RankingEntry, Watering } from "../domain/types.js";
+import {
+  WATERING_REMINDER_HOURS,
+  type DeadMarimo,
+  type DueWateringReminder,
+  type RankingEntry,
+  type Watering,
+  type WateringReminderHour
+} from "../domain/types.js";
 
 export const WATER_BUTTON_ID = "marimo:water";
 export const STATUS_BUTTON_ID = "marimo:status";
 export const NAME_BUTTON_ID = "marimo:name";
 export const REVIVE_BUTTON_ID = "marimo:revive";
+export const REMINDER_BUTTON_ID = "marimo:reminder";
+export const REMINDER_OFF_BUTTON_ID = "marimo:reminder:off";
+export const REMINDER_HOUR_BUTTON_PREFIX = "marimo:reminder:hour:";
 export const NAME_MODAL_ID = "marimo:name-modal";
 export const NAME_INPUT_ID = "marimo:name-input";
 const MARIMO_GREEN = 0x20a51f;
@@ -64,7 +74,12 @@ export function waterPanel(waterXp: number): {
       .setCustomId(REVIVE_BUTTON_ID)
       .setLabel(`${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活`)
       .setEmoji("🌿")
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(REMINDER_BUTTON_ID)
+      .setLabel("水換え通知")
+      .setEmoji("🔔")
+      .setStyle(ButtonStyle.Secondary)
   );
   return {
     content: "",
@@ -97,6 +112,43 @@ export function waterPanel(waterXp: number): {
     components: [row],
     flags: []
   };
+}
+
+export function wateringReminderSettings(hour: WateringReminderHour | null): {
+  content: string;
+  components: ActionRowBuilder<ButtonBuilder>[];
+} {
+  const current = hour === null ? "**OFF**" : `毎日 **${hour}:00（日本時間）**`;
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    ...WATERING_REMINDER_HOURS.map((candidate) =>
+      new ButtonBuilder()
+        .setCustomId(`${REMINDER_HOUR_BUTTON_PREFIX}${candidate}`)
+        .setLabel(`${candidate}:00`)
+        .setStyle(
+          candidate === hour ? ButtonStyle.Success : ButtonStyle.Secondary
+        )
+    ),
+    new ButtonBuilder()
+      .setCustomId(REMINDER_OFF_BUTTON_ID)
+      .setLabel("OFF")
+      .setStyle(hour === null ? ButtonStyle.Success : ButtonStyle.Secondary)
+  );
+  return {
+    content: [
+      "# 🔔 水換え通知",
+      `現在: ${current}`,
+      "その日にまだ水を替えていない場合だけ、まりもログで1日1回お知らせします。",
+      "枯れている間は通知しません。"
+    ].join("\n"),
+    components: [row]
+  };
+}
+
+export function wateringReminderContent(reminder: DueWateringReminder): string {
+  return [
+    `💧 ${ownerMention(reminder.userId)} さん、今日はまだ水換えをしていません。`,
+    `**${displayMarimoName(reminder.marimoName)}** が、ぷかぷか待っています。`
+  ].join("\n");
 }
 
 export function nameModal(): ModalBuilder {
@@ -192,7 +244,8 @@ export function statusContent(
   entry: RankingEntry,
   baseXp: number,
   now: Date,
-  dialogueId: string | null = null
+  dialogueId: string | null = null,
+  reminderHour: WateringReminderHour | null = null
 ): string {
   const nextCareDay =
     entry.lastWateredDate === jstDate(now) ? entry.ageDays + 1 : entry.ageDays;
@@ -203,6 +256,9 @@ export function statusContent(
     `大きさ **${entry.sizeMm.toFixed(2)} mm**`,
     `最後の水替え **${entry.lastWateredDate}**`,
     `次の水替え **${wateringXp(baseXp, nextCareDay)} XP**`,
+    reminderHour === null
+      ? "水換え通知 **OFF**"
+      : `水換え通知 毎日 **${reminderHour}:00**（日本時間）`,
     ...(dialogue === null
       ? []
       : ["", `> 🟢 ${displayMarimoName(entry.name)}「${dialogue}」`]),

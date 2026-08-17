@@ -8,6 +8,10 @@ export function jstDate(now: Date): string {
   return new Date(now.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+export function jstHour(now: Date): number {
+  return new Date(now.getTime() + JST_OFFSET_MS).getUTCHours();
+}
+
 export function addCalendarDays(date: string, days: number): string {
   const midnight = Date.parse(`${date}T00:00:00.000Z`);
   return new Date(midnight + days * DAY_MS).toISOString().slice(0, 10);

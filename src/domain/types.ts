@@ -67,6 +67,19 @@ export type PersonalMarimoStatus = RankingEntry & {
   dialogueId: string | null;
 };
 
+export const WATERING_REMINDER_HOURS = [8, 12, 18, 21] as const;
+
+export type WateringReminderHour = (typeof WATERING_REMINDER_HOURS)[number];
+
+export type DueWateringReminder = {
+  guildId: string;
+  userId: string;
+  marimoName: string;
+  logChannelId: string;
+  reminderHour: WateringReminderHour;
+  reminderDate: string;
+};
+
 export type PanelKind = "water" | "size" | "dead";
 
 export type GuildConfig = {

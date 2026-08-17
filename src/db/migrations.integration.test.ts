@@ -8,6 +8,70 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl === undefined ? describe.skip : describe;
 
 suite("database migration upgrade", () => {
+  it("adds opt-in watering reminders without enabling existing users", async () => {
+    const admin = new Pool({ connectionString: databaseUrl });
+    const schema = "marimo_watering_reminder_upgrade_test";
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`
+    });
+
+    try {
+      for (const migration of [
+        "001_initial.sql",
+        "002_watering_log_delivery.sql",
+        "003_xp_compensation.sql",
+        "004_watering_birth.sql",
+        "005_xp_delivery_fairness.sql",
+        "006_calendar_day_growth.sql",
+        "007_allowed_roles.sql",
+        "008_marimo_revival.sql",
+        "009_lower_revival_cost.sql",
+        "010_watering_dialogue.sql",
+        "011_dead_ranking_panel.sql"
+      ]) {
+        await pool.query(
+          await readFile(
+            resolve(process.cwd(), "migrations", migration),
+            "utf8"
+          )
+        );
+      }
+      await pool.query(
+        `INSERT INTO marimos (
+           guild_id, user_id, generation, owner_display_name, name,
+           born_at, last_watered_at, last_watered_date
+         ) VALUES ('1001', '2001', 1, 'owner', 'まりも',
+                   '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10')`
+      );
+
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "012_watering_reminders.sql"),
+          "utf8"
+        )
+      );
+
+      const repository = new MarimoRepository(pool);
+      expect(
+        await repository.getWateringReminderHour("1001", "2001")
+      ).toBeNull();
+      const preferences = await pool.query<{ count: string }>(
+        "SELECT COUNT(*) AS count FROM marimo_watering_reminder_preferences"
+      );
+      expect(preferences.rows[0]?.count).toBe("0");
+
+      await repository.setWateringReminderHour("1001", "2001", 18);
+      expect(await repository.getWateringReminderHour("1001", "2001")).toBe(18);
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
   it("adds an independent dead ranking panel without changing existing panels", async () => {
     const admin = new Pool({ connectionString: databaseUrl });
     const schema = "marimo_dead_panel_upgrade_test";

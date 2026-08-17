@@ -10,10 +10,15 @@ import {
   NAME_INPUT_ID,
   NAME_MODAL_ID,
   rankingPanel,
+  REMINDER_BUTTON_ID,
+  REMINDER_HOUR_BUTTON_PREFIX,
+  REMINDER_OFF_BUTTON_ID,
   REVIVE_BUTTON_ID,
   STATUS_BUTTON_ID,
   statusContent,
   wateringLogContent,
+  wateringReminderContent,
+  wateringReminderSettings,
   waterPanel,
   WATER_BUTTON_ID
 } from "./presentation.js";
@@ -95,7 +100,7 @@ describe("Discord presentation", () => {
       ].join("\n")
     );
     expect(embed?.footer?.text).toBe("日付は日本時間の0:00に切り替わります");
-    expect(panel.components[0]?.components).toHaveLength(4);
+    expect(panel.components[0]?.components).toHaveLength(5);
     expect(
       panel.components[0]?.components.map((component) => component.toJSON())
     ).toContainEqual(expect.objectContaining({ custom_id: NAME_BUTTON_ID }));
@@ -123,6 +128,61 @@ describe("Discord presentation", () => {
         label: "1,000 XPで復活"
       })
     );
+    expect(
+      panel.components[0]?.components.map((component) => component.toJSON())
+    ).toContainEqual(
+      expect.objectContaining({
+        custom_id: REMINDER_BUTTON_ID,
+        label: "水換え通知"
+      })
+    );
+  });
+
+  it("shows opt-in reminder times with OFF selected by default", () => {
+    const disabled = wateringReminderSettings(null);
+    const enabled = wateringReminderSettings(21);
+    const disabledButtons = disabled.components[0]?.components.map(
+      (component) => component.toJSON()
+    );
+    const enabledButtons = enabled.components[0]?.components.map((component) =>
+      component.toJSON()
+    );
+
+    expect(disabled.content).toContain("現在: **OFF**");
+    expect(disabled.content).toContain("まりもログで1日1回");
+    expect(disabledButtons).toHaveLength(5);
+    expect(disabledButtons).toContainEqual(
+      expect.objectContaining({
+        custom_id: REMINDER_OFF_BUTTON_ID,
+        style: 3
+      })
+    );
+    expect(enabled.content).toContain("毎日 **21:00（日本時間）**");
+    expect(enabledButtons).toContainEqual(
+      expect.objectContaining({
+        custom_id: `${REMINDER_HOUR_BUTTON_PREFIX}21`,
+        style: 3
+      })
+    );
+  });
+
+  it("mentions only the owner in a gently worded watering reminder", () => {
+    const content = wateringReminderContent({
+      guildId: "1001",
+      userId: "2001",
+      marimoName: "**まるぽん**",
+      logChannelId: "3001",
+      reminderHour: 21,
+      reminderDate: "2026-08-11"
+    });
+
+    expect(content).toContain("<@2001> さん");
+    expect(content).toContain("今日はまだ水換えをしていません");
+    expect(content).toContain(
+      "**\\*\\*まるぽん\\*\\*** が、ぷかぷか待っています"
+    );
+    expect(content).not.toContain("@everyone");
+    expect(content).not.toContain("@here");
   });
 
   it("opens a constrained name modal from the panel", () => {
@@ -320,6 +380,10 @@ describe("Discord presentation", () => {
 
     expect(status).toContain("連続飼育 **2日**");
     expect(status).toContain("次の水替え **120 XP**");
+    expect(status).toContain("水換え通知 **OFF**");
+    expect(
+      statusContent(marimo, 100, new Date("2026-08-11T03:00:00Z"), null, 18)
+    ).toContain("水換え通知 毎日 **18:00**（日本時間）");
   });
 
   it("shows today's persisted marimo line in personal status", () => {

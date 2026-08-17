@@ -13,7 +13,7 @@ suite("MarimoRepository integration", () => {
   beforeAll(async () => {
     await runMigrations(pool);
     await pool.query(
-      "TRUNCATE marimo_allowed_roles, marimo_revivals, marimo_xp_awards, marimo_waterings, marimos, marimo_guild_configs RESTART IDENTITY CASCADE"
+      "TRUNCATE marimo_watering_reminder_preferences, marimo_allowed_roles, marimo_revivals, marimo_xp_awards, marimo_waterings, marimos, marimo_guild_configs RESTART IDENTITY CASCADE"
     );
   });
 
@@ -377,6 +377,91 @@ suite("MarimoRepository integration", () => {
     expect(await repository.removeAllowedRole("1007", "5001")).toBe(true);
     expect(await repository.removeAllowedRole("1007", "5001")).toBe(false);
     expect(await repository.allowedRoleIds("1007")).toEqual(["5002"]);
+  });
+
+  it("keeps reminders opt-in, claims them once, and stops after five failures", async () => {
+    const guildId = "1010";
+    const userId = "2011";
+    await repository.setLogChannel(guildId, "3010");
+    await repository.water({
+      guildId,
+      userId,
+      channelId: "3011",
+      displayName: "通知希望",
+      now: new Date("2026-08-10T03:00:00Z"),
+      baseXp: 100
+    });
+
+    expect(
+      await repository.getWateringReminderHour(guildId, userId)
+    ).toBeNull();
+    expect(
+      await repository.claimDueWateringReminders(
+        new Date("2026-08-11T11:59:59Z")
+      )
+    ).toEqual([]);
+
+    await repository.setWateringReminderHour(guildId, userId, 21);
+    expect(await repository.getWateringReminderHour(guildId, userId)).toBe(21);
+    expect(
+      await repository.claimDueWateringReminders(
+        new Date("2026-08-11T11:59:59Z")
+      )
+    ).toEqual([]);
+
+    const dueAtNine = new Date("2026-08-11T12:00:00Z");
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const claimed = await repository.claimDueWateringReminders(dueAtNine);
+      expect(claimed).toEqual([
+        {
+          guildId,
+          userId,
+          marimoName: "通知希望のまりも",
+          logChannelId: "3010",
+          reminderHour: 21,
+          reminderDate: "2026-08-11"
+        }
+      ]);
+      expect(
+        await repository.wateringReminderStillDue(guildId, userId, "2026-08-11")
+      ).toBe(true);
+      await repository.releaseWateringReminderClaim(
+        guildId,
+        userId,
+        "2026-08-11"
+      );
+    }
+    expect(await repository.claimDueWateringReminders(dueAtNine)).toEqual([]);
+
+    await repository.setWateringReminderHour(guildId, userId, null);
+    expect(
+      await repository.getWateringReminderHour(guildId, userId)
+    ).toBeNull();
+  });
+
+  it("does not remind after today's care or after the marimo has died", async () => {
+    const guildId = "1011";
+    await repository.setLogChannel(guildId, "3011");
+    for (const [userId, wateredAt] of [
+      ["2012", "2026-08-11T03:00:00Z"],
+      ["2013", "2026-08-09T03:00:00Z"]
+    ] as const) {
+      await repository.water({
+        guildId,
+        userId,
+        channelId: "3012",
+        displayName: userId,
+        now: new Date(wateredAt),
+        baseXp: 100
+      });
+      await repository.setWateringReminderHour(guildId, userId, 21);
+    }
+
+    expect(
+      await repository.claimDueWateringReminders(
+        new Date("2026-08-11T12:00:00Z")
+      )
+    ).toEqual([]);
   });
 
   it("prepares and completes an idempotent revival without growing while dead", async () => {

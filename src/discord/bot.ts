@@ -20,11 +20,13 @@ import type { Config } from "../config/env.js";
 import type { MarimoRepository } from "../db/repository.js";
 import type {
   DeadMarimo,
+  DueWateringReminder,
   GuildConfig,
   PanelKind,
   RankingEntry,
   Revival,
-  Watering
+  Watering,
+  WateringReminderHour
 } from "../domain/types.js";
 import { REVIVAL_COST_XP, wateringXp } from "../domain/rewards.js";
 import { renderLivingTankImage, renderTankImage } from "../rendering/tank.js";
@@ -43,11 +45,16 @@ import {
   NAME_INPUT_ID,
   NAME_MODAL_ID,
   rankingPanel,
+  REMINDER_BUTTON_ID,
+  REMINDER_HOUR_BUTTON_PREFIX,
+  REMINDER_OFF_BUTTON_ID,
   REVIVE_BUTTON_ID,
   STATUS_BUTTON_ID,
   statusContent,
   WATER_BUTTON_ID,
   wateringLogContent,
+  wateringReminderContent,
+  wateringReminderSettings,
   waterPanel
 } from "./presentation.js";
 
@@ -102,6 +109,18 @@ export function isMarimoImageLog(message: Message, botUserId: string): boolean {
 type PermissionChecker = {
   has(permission: bigint): boolean;
 };
+
+type ReminderChoice = { hour: WateringReminderHour | null };
+
+function reminderChoice(customId: string): ReminderChoice | null {
+  if (customId === REMINDER_OFF_BUTTON_ID) return { hour: null };
+  if (!customId.startsWith(REMINDER_HOUR_BUTTON_PREFIX)) return null;
+  const value = Number(customId.slice(REMINDER_HOUR_BUTTON_PREFIX.length));
+  if (value === 8 || value === 12 || value === 18 || value === 21) {
+    return { hour: value };
+  }
+  return null;
+}
 
 const LOG_POST_PERMISSIONS = [
   [PermissionFlagsBits.ViewChannel, "チャンネルを見る"],
@@ -220,9 +239,10 @@ export class MarimoBot {
     await this.runMaintenance();
     this.sweepTimer = setInterval(
       () =>
-        this.runInBackground("Scheduled death sweep", () =>
-          this.expireNeglected()
-        ),
+        this.runInBackground("Scheduled marimo maintenance", async () => {
+          await this.expireNeglected();
+          await this.deliverDueWateringReminders();
+        }),
       5 * 60_000
     );
     this.xpTimer = setInterval(() => {
@@ -246,11 +266,19 @@ export class MarimoBot {
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
       if (interaction.isButton()) {
+        const selectedReminder = reminderChoice(interaction.customId);
+        if (selectedReminder !== null) {
+          if (await this.ensureMarimoAccess(interaction)) {
+            await this.handleReminderChoice(interaction, selectedReminder.hour);
+          }
+          return;
+        }
         const isMarimoPanelButton = [
           WATER_BUTTON_ID,
           STATUS_BUTTON_ID,
           NAME_BUTTON_ID,
-          REVIVE_BUTTON_ID
+          REVIVE_BUTTON_ID,
+          REMINDER_BUTTON_ID
         ].includes(interaction.customId);
         if (
           isMarimoPanelButton &&
@@ -270,6 +298,8 @@ export class MarimoBot {
           await this.handleNameButton(interaction);
         if (interaction.customId === REVIVE_BUTTON_ID)
           await this.handleRevive(interaction);
+        if (interaction.customId === REMINDER_BUTTON_ID)
+          await this.handleReminderButton(interaction);
         return;
       }
       if (interaction.isModalSubmit()) {
@@ -533,11 +563,13 @@ export class MarimoBot {
     }
     await interaction.deferReply({ ephemeral: true });
     const now = new Date();
-    const entry = await this.repository.getLiving(
-      interaction.guildId,
-      interaction.user.id,
-      now
-    );
+    const [entry, reminderHour] = await Promise.all([
+      this.repository.getLiving(interaction.guildId, interaction.user.id, now),
+      this.repository.getWateringReminderHour(
+        interaction.guildId,
+        interaction.user.id
+      )
+    ]);
     if (entry === null) {
       await interaction.editReply({
         content:
@@ -551,9 +583,53 @@ export class MarimoBot {
         entry,
         this.config.WATER_XP,
         now,
-        entry.dialogueId
+        entry.dialogueId,
+        reminderHour
       ),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })]
+    });
+  }
+
+  private async handleReminderButton(
+    interaction: ButtonInteraction
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    const hour = await this.repository.getWateringReminderHour(
+      interaction.guildId,
+      interaction.user.id
+    );
+    await interaction.reply({
+      ...wateringReminderSettings(hour),
+      ephemeral: true,
+      allowedMentions: { parse: [] }
+    });
+  }
+
+  private async handleReminderChoice(
+    interaction: ButtonInteraction,
+    hour: WateringReminderHour | null
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    await this.repository.setWateringReminderHour(
+      interaction.guildId,
+      interaction.user.id,
+      hour
+    );
+    await interaction.update({
+      ...wateringReminderSettings(hour),
+      allowedMentions: { parse: [] }
     });
   }
 
@@ -684,7 +760,7 @@ export class MarimoBot {
         interaction.channelId
       );
       await interaction.reply({
-        content: `画像ログの投稿先を <#${interaction.channelId}> に設定しました。`,
+        content: `まりもログと水替え通知の投稿先を <#${interaction.channelId}> に設定しました。`,
         ephemeral: true
       });
       return;
@@ -692,7 +768,7 @@ export class MarimoBot {
     if (subcommand === "log-disable") {
       await this.repository.setLogChannel(interaction.guildId, null);
       await interaction.reply({
-        content: "画像ログを停止しました。",
+        content: "まりもログと水替え通知を停止しました。",
         ephemeral: true
       });
       return;
@@ -711,7 +787,7 @@ export class MarimoBot {
         `水替えパネル: ${configuredChannel(config.waterPanelMessageId, config.waterPanelChannelId)}`,
         `大きさランキング: ${configuredChannel(config.sizePanelMessageId, config.sizePanelChannelId)}`,
         `枯れたまりもランキング: ${configuredChannel(config.deadPanelMessageId, config.deadPanelChannelId)}`,
-        `画像ログ: ${config.logChannelId === null ? "未設定" : `<#${config.logChannelId}>`}`,
+        `まりもログ・水替え通知: ${config.logChannelId === null ? "未設定" : `<#${config.logChannelId}>`}`,
         `利用可能ロール: ${allowedRoleIds.length === 0 ? "未設定（全員利用可能）" : allowedRoleIds.map((roleId) => `<@&${roleId}>`).join("、")}`,
         `XP連携: ${this.xpDelivery.enabled ? "有効" : "未設定（outboxに保持）"}`
       ].join("\n"),
@@ -1196,6 +1272,49 @@ export class MarimoBot {
     });
   }
 
+  private async deliverDueWateringReminders(now = new Date()): Promise<void> {
+    const reminders = await this.repository.claimDueWateringReminders(now);
+    for (const reminder of reminders) {
+      await this.runBestEffort("Watering reminder delivery", async () => {
+        try {
+          const stillDue = await this.repository.wateringReminderStillDue(
+            reminder.guildId,
+            reminder.userId,
+            reminder.reminderDate
+          );
+          if (!stillDue) return;
+          await this.postWateringReminder(reminder);
+        } catch (error) {
+          await this.repository.releaseWateringReminderClaim(
+            reminder.guildId,
+            reminder.userId,
+            reminder.reminderDate
+          );
+          throw error;
+        }
+      });
+    }
+  }
+
+  private async postWateringReminder(
+    reminder: DueWateringReminder
+  ): Promise<void> {
+    const channel = await this.client.channels.fetch(reminder.logChannelId);
+    if (!(channel instanceof TextChannel)) {
+      throw new Error(
+        "Configured watering reminder log channel is unavailable"
+      );
+    }
+    await channel.send({
+      content: wateringReminderContent(reminder),
+      allowedMentions: { parse: [], users: [reminder.userId] },
+      nonce: logNonce(
+        `watering-reminder:${reminder.guildId}:${reminder.userId}:${reminder.reminderDate}`
+      ),
+      enforceNonce: true
+    });
+  }
+
   private async expireNeglected(): Promise<void> {
     const now = new Date();
     const owners = await this.repository.dueOwners(now);
@@ -1225,6 +1344,7 @@ export class MarimoBot {
     await this.retireAgePanels();
     await this.refreshWaterPanels();
     await this.expireNeglected();
+    await this.deliverDueWateringReminders();
     await this.refreshRankingPanels();
     await this.deliverPendingWateringLogs();
     await this.xpDelivery.deliverPending();

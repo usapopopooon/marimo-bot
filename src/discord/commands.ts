@@ -24,10 +24,10 @@ export const commands = [
     .addSubcommand((subcommand) =>
       subcommand
         .setName("log")
-        .setDescription("実行したチャンネルを画像ログの投稿先に設定")
+        .setDescription("実行したチャンネルをまりもログと通知の投稿先に設定")
     )
     .addSubcommand((subcommand) =>
-      subcommand.setName("log-disable").setDescription("画像ログを停止")
+      subcommand.setName("log-disable").setDescription("まりもログと通知を停止")
     )
     .addSubcommand((subcommand) =>
       subcommand

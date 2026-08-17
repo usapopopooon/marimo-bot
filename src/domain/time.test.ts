@@ -4,6 +4,7 @@ import {
   deathAt,
   isDead,
   jstDate,
+  jstHour,
   revivedBornAt,
   sizeAt
 } from "./time.js";
@@ -12,6 +13,12 @@ describe("Japanese calendar care rules", () => {
   it("switches the care date at Japanese midnight", () => {
     expect(jstDate(new Date("2026-08-10T14:59:59Z"))).toBe("2026-08-10");
     expect(jstDate(new Date("2026-08-10T15:00:00Z"))).toBe("2026-08-11");
+  });
+
+  it("reads reminder hours in Japanese time", () => {
+    expect(jstHour(new Date("2026-08-10T22:59:59Z"))).toBe(7);
+    expect(jstHour(new Date("2026-08-10T23:00:00Z"))).toBe(8);
+    expect(jstHour(new Date("2026-08-11T12:00:00Z"))).toBe(21);
   });
 
   it("dies only after one whole calendar day was missed", () => {
