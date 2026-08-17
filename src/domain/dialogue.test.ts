@@ -43,6 +43,35 @@ describe("marimo dialogue", () => {
     }
   });
 
+  it("mixes harmless aquarium mysteries with gentle self-deprecation", () => {
+    const everyday = MARIMO_DIALOGUES.filter((line) =>
+      line.id.startsWith("everyday-")
+    );
+    const requestedSetups = [
+      "底の石が動いた気がする。石は知らないって。",
+      "水草から相談されたけど、聞こえないふりをした。",
+      "同じ泡を三回見た。たぶん顔なじみ。",
+      "きょうの水、ちょっと木曜日の味がする。"
+    ];
+
+    expect(everyday).toHaveLength(100);
+    for (const setup of requestedSetups) {
+      expect(
+        everyday.filter((line) => line.text.startsWith(setup))
+      ).toHaveLength(10);
+    }
+    expect(everyday.some((line) => line.text.includes("ぼくより行動力"))).toBe(
+      true
+    );
+    expect(everyday.some((line) => line.text.includes("ただ丸く"))).toBe(true);
+    expect(everyday.some((line) => line.text.includes("困ってはいない"))).toBe(
+      true
+    );
+    for (const line of everyday) {
+      expect(line.text).not.toMatch(/飼い主|監視|背後|呪|怖|逃げ|助けて/);
+    }
+  });
+
   it("uses dialogue suited to births, early care, and milestones", () => {
     const birth = selectMarimoDialogue({
       ...ordinaryContext,
