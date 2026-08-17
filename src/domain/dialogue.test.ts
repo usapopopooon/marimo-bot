@@ -23,6 +23,7 @@ describe("marimo dialogue", () => {
       expect(line.text.length).toBeGreaterThanOrEqual(10);
       expect(line.text.length).toBeLessThanOrEqual(120);
       expect(line.text).not.toMatch(/\r|\n|<@|@everyone|@here|https?:\/\//i);
+      expect(line.motifIds).toHaveLength(2);
     }
   });
 
@@ -30,6 +31,14 @@ describe("marimo dialogue", () => {
     for (const line of MARIMO_DIALOGUES) {
       expect(line.text).not.toMatch(
         /あなた|宝物|きずな|しあわせ|幸せ|胸のあたり|大切な思い出|ぬくもり/
+      );
+    }
+  });
+
+  it("never grades, orders, or talks down to the owner", () => {
+    for (const line of MARIMO_DIALOGUES) {
+      expect(line.text).not.toMatch(
+        /飼育係|まりも係|合格|不合格|採点|感心|\d+点|品質|次回も|忘れなかった|当然|褒めて|まかせて|許して/
       );
     }
   });
@@ -110,6 +119,33 @@ describe("marimo dialogue", () => {
       expect(recentDialogueIds).not.toContain(dialogue.id);
       recentDialogueIds.unshift(dialogue.id);
       recentDialogueIds.splice(7);
+    }
+  });
+
+  it("avoids recently used setups and punchlines, not only exact lines", () => {
+    const recentDialogueIds: string[] = [];
+    const recentMotifIds = new Set<string>();
+
+    for (let index = 0; index < 8; index += 1) {
+      const dialogue = selectMarimoDialogue({
+        ...ordinaryContext,
+        eventId: `motif-event-${index}`,
+        ageDays: 4,
+        recentDialogueIds
+      });
+
+      expect(
+        dialogue.motifIds.every((motifId) => !recentMotifIds.has(motifId))
+      ).toBe(true);
+      recentDialogueIds.unshift(dialogue.id);
+      recentDialogueIds.splice(7);
+      recentMotifIds.clear();
+      for (const recentId of recentDialogueIds) {
+        const recent = MARIMO_DIALOGUES.find((line) => line.id === recentId);
+        for (const motifId of recent?.motifIds ?? []) {
+          recentMotifIds.add(motifId);
+        }
+      }
     }
   });
 
