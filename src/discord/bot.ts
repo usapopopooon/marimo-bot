@@ -1237,7 +1237,7 @@ export class MarimoBot {
     const channel = await this.client.channels.fetch(config.logChannelId);
     if (!(channel instanceof TextChannel)) return;
     await this.postDeathLogToChannel(channel, death, {
-      notifyOwner: true,
+      notifyOwner: false,
       deliveryKey: `death:${death.id}:${death.diedAt.toISOString()}`
     });
   }

@@ -291,7 +291,7 @@ export function wateringLogContent(watering: Watering): string {
 
 export function deathLogContent(death: DeadMarimo): string {
   return [
-    `🥀 ${ownerMention(death.userId)} の **${displayMarimoName(death.name)}** は枯れてしまいました`,
+    `🥀 **${displayMarimoName(death.ownerDisplayName)}**さんの **${displayMarimoName(death.name)}** は枯れてしまいました`,
     `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
   ].join("\n");
 }

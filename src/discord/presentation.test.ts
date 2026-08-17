@@ -356,8 +356,11 @@ describe("Discord presentation", () => {
     expect(historical).not.toContain(`> 🟢 ownerのまりも「`);
   });
 
-  it("keeps Discord user mention syntax without URL links in death logs", () => {
-    const living = entry("owner", 1, 10);
+  it("uses a safe display name without an @ mention in death logs", () => {
+    const living = {
+      ...entry("owner", 1, 10),
+      ownerDisplayName: "**飼い主**"
+    };
     const dead = {
       ...living,
       diedAt: new Date("2026-08-11T15:00:00Z"),
@@ -366,7 +369,8 @@ describe("Discord presentation", () => {
 
     const memorial = deathLogContent(dead);
 
-    expect(memorial).toContain("<@owner>");
+    expect(memorial).toContain("**\\*\\*飼い主\\*\\***さんの");
+    expect(memorial).not.toContain("<@owner>");
     expect(memorial).not.toContain("https://");
   });
 

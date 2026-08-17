@@ -1195,7 +1195,7 @@ describe("panel interaction wiring", () => {
     expect(markWateringLogDelivered).toHaveBeenCalledWith(watering.eventId);
   });
 
-  it("notifies only the owner on live milestone and death logs", async () => {
+  it("notifies live milestones but keeps midnight death logs silent", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
     const channel = textChannelWithSend(send);
     const bot = botWith({
@@ -1244,10 +1244,8 @@ describe("panel interaction wiring", () => {
       enforceNonce?: boolean;
     };
     expect(memorial.content).toContain("枯れてしまいました");
-    expect(memorial.allowedMentions).toEqual({
-      parse: [],
-      users: ["2001"]
-    });
+    expect(memorial.content).not.toContain("<@2001>");
+    expect(memorial.allowedMentions).toEqual({ parse: [] });
     expect(memorial.nonce).toHaveLength(25);
     expect(memorial.nonce).not.toBe(milestone.nonce);
     expect(memorial.enforceNonce).toBe(true);
