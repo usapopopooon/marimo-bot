@@ -10,14 +10,15 @@ const ordinaryContext = {
   ageDays: 12,
   sizeMm: 13.3,
   wateredDate: "2026-08-21",
+  wateredAt: new Date("2026-08-21T03:00:00Z"),
   recentDialogueIds: []
 };
 
 describe("marimo dialogue", () => {
-  it("provides exactly 1,000 safe and genuinely distinct lines", () => {
-    expect(MARIMO_DIALOGUES).toHaveLength(1_000);
-    expect(new Set(MARIMO_DIALOGUES.map((line) => line.id)).size).toBe(1_000);
-    expect(new Set(MARIMO_DIALOGUES.map((line) => line.text)).size).toBe(1_000);
+  it("provides exactly 1,400 safe and genuinely distinct lines", () => {
+    expect(MARIMO_DIALOGUES).toHaveLength(1_400);
+    expect(new Set(MARIMO_DIALOGUES.map((line) => line.id)).size).toBe(1_400);
+    expect(new Set(MARIMO_DIALOGUES.map((line) => line.text)).size).toBe(1_400);
     for (const line of MARIMO_DIALOGUES) {
       expect(line.id).toMatch(/^[a-z]+-\d{2}-\d{2}$/);
       expect(line.text.length).toBeGreaterThanOrEqual(10);
@@ -72,6 +73,46 @@ describe("marimo dialogue", () => {
     }
   });
 
+  it("keeps every late-night variation quiet, time-aware, and non-directive", () => {
+    const lateNight = MARIMO_DIALOGUES.filter((line) =>
+      line.id.startsWith("latenight-")
+    );
+
+    expect(lateNight).toHaveLength(100);
+    for (const line of lateNight) {
+      expect(line.text).toMatch(
+        /夜|遅い時間|こんな時間|深夜|静かな時間|時計|朝にはまだ/
+      );
+      expect(line.text).not.toMatch(/寝ろ|寝てください|早く寝|休んでください/);
+      expect(line.text).not.toMatch(
+        /そばで|いっしょに|なれたら|そっと預か|降りてきました|やさしいところ/
+      );
+      expect(line.text).toMatch(
+        /普段から|違いは、時間だけ|顔はありません|先に落ち着いて|たぶん泡|差は不明|特別な仕事|確認はできません|見分け方はありません|最初から少なめ/
+      );
+    }
+    expect(
+      lateNight.filter((line) =>
+        line.text.includes(
+          "実は、さっきまで寝ていました。いえ、寝ていません。見分け方はありません。"
+        )
+      )
+    ).toHaveLength(10);
+  });
+
+  it("does not infer room brightness from the time of day", () => {
+    const timeBased = MARIMO_DIALOGUES.filter((line) =>
+      /^(morning|daytime|evening|latenight)-/.test(line.id)
+    );
+
+    expect(timeBased).toHaveLength(400);
+    for (const line of timeBased) {
+      expect(line.text).not.toMatch(
+        /明る|明かり|光が|光で|光を|ぴか|きら|夕暮れ|暮れていく/
+      );
+    }
+  });
+
   it("uses dialogue suited to births, early care, and milestones", () => {
     const birth = selectMarimoDialogue({
       ...ordinaryContext,
@@ -95,7 +136,7 @@ describe("marimo dialogue", () => {
     expect(milestone.id).toMatch(/^milestone-/);
   });
 
-  it("mixes everyday lines with the matching season, bond, and size themes", () => {
+  it("mixes everyday lines with the matching time, season, bond, and size themes", () => {
     const summerCategories = new Set(
       Array.from(
         { length: 200 },
@@ -120,9 +161,76 @@ describe("marimo dialogue", () => {
       )
     );
 
-    expect(summerCategories).toEqual(new Set(["everyday", "summer"]));
+    expect(summerCategories).toEqual(
+      new Set(["everyday", "summer", "daytime"])
+    );
     expect(matureWinterCategories).toEqual(
-      new Set(["everyday", "winter", "bond", "large"])
+      new Set(["everyday", "winter", "daytime", "bond", "large"])
+    );
+  });
+
+  it("uses a soothing late-night line for ordinary care from 22:00 through 04:59 JST", () => {
+    for (const wateredAt of [
+      new Date("2026-08-21T13:00:00Z"),
+      new Date("2026-08-21T15:00:00Z"),
+      new Date("2026-08-21T19:59:59Z")
+    ]) {
+      for (let index = 0; index < 20; index += 1) {
+        const dialogue = selectMarimoDialogue({
+          ...ordinaryContext,
+          eventId: `late-night-event-${wateredAt.toISOString()}-${index}`,
+          wateredAt
+        });
+        expect(dialogue.id).toMatch(/^latenight-/);
+      }
+    }
+  });
+
+  it("keeps birth and milestone context ahead of the late-night theme", () => {
+    const lateNight = new Date("2026-08-21T15:00:00Z");
+    const birth = selectMarimoDialogue({
+      ...ordinaryContext,
+      eventId: "late-night-birth-event",
+      wateredAt: lateNight,
+      isBirth: true,
+      ageDays: 1
+    });
+    const milestone = selectMarimoDialogue({
+      ...ordinaryContext,
+      eventId: "late-night-milestone-event",
+      wateredAt: lateNight,
+      ageDays: 10
+    });
+
+    expect(birth.id).toMatch(/^birth-/);
+    expect(milestone.id).toMatch(/^milestone-/);
+  });
+
+  it("uses morning, daytime, and evening lines only in their JST periods", () => {
+    const categoriesAt = (wateredAt: Date) =>
+      new Set(
+        Array.from(
+          { length: 300 },
+          (_, index) =>
+            selectMarimoDialogue({
+              ...ordinaryContext,
+              eventId: `time-event-${wateredAt.toISOString()}-${index}`,
+              wateredAt
+            }).id.split("-")[0]
+        )
+      );
+
+    expect(categoriesAt(new Date("2026-08-20T20:00:00Z"))).toEqual(
+      new Set(["everyday", "summer", "morning"])
+    );
+    expect(categoriesAt(new Date("2026-08-21T02:00:00Z"))).toEqual(
+      new Set(["everyday", "summer", "daytime"])
+    );
+    expect(categoriesAt(new Date("2026-08-21T08:00:00Z"))).toEqual(
+      new Set(["everyday", "summer", "evening"])
+    );
+    expect(categoriesAt(new Date("2026-08-21T12:59:59Z"))).toEqual(
+      new Set(["everyday", "summer", "evening"])
     );
   });
 

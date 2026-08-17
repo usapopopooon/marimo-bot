@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { jstHour } from "./time.js";
 
 export type MarimoDialogue = Readonly<{
   id: string;
@@ -13,6 +14,10 @@ type DialogueCategory =
   | "bond"
   | "milestone"
   | "large"
+  | "morning"
+  | "daytime"
+  | "evening"
+  | "latenight"
   | "spring"
   | "summer"
   | "autumn"
@@ -24,6 +29,7 @@ type DialogueSelection = {
   ageDays: number;
   sizeMm: number;
   wateredDate: string;
+  wateredAt: Date;
   recentDialogueIds: readonly string[];
 };
 
@@ -217,6 +223,118 @@ const LARGE_DIALOGUES = buildCategory(
   ]
 );
 
+const MORNING_DIALOGUES = buildCategory(
+  "morning",
+  [
+    "朝になりました。水槽の底では、まだ会議が始まっていません。",
+    "おはようの泡が、ひとつ上っていきました。",
+    "朝のお水に替わって、泡がひとつ増えました。数はたぶんです。",
+    "水草が朝の支度をしています。揺れているだけかもしれません。",
+    "朝が来たと泡から聞きました。情報源は泡です。",
+    "朝いちばんの水槽は、まだ静かです。",
+    "きょう最初の泡を見送りました。",
+    "朝の空気は見えないけど、お水が少し軽そうです。",
+    "水面まで行かずに、朝へ参加しています。",
+    "目覚ましの時間らしいです。ぼくには音の設定がありません。"
+  ],
+  [
+    "ぼくもゆっくり、きょうを始めています。",
+    "まずは定位置で、丸さを整えます。",
+    "急がず、朝のぶんだけ育つ予定です。",
+    "まだ少し眠いので、いつもどおりです。",
+    "きょうも小さく、いい水音がしています。",
+    "朝の予定は、光合成とひと休みです。",
+    "朝になっても、動きはひかえめです。",
+    "水槽のすみから、そっと参加します。",
+    "一日の最初を、ころんと受け止めています。",
+    "このあとは、のんびり朝が進むだけです。"
+  ]
+);
+
+const DAYTIME_DIALOGUES = buildCategory(
+  "daytime",
+  [
+    "お昼になりました。水槽は通常どおりです。",
+    "昼どきの泡は、少し忙しそうに上っています。",
+    "お昼の水の中で、小石の模様を見ています。見覚えはあります。",
+    "お昼になって、水草が休憩中です。揺れてはいます。",
+    "日中の水槽は、いつもより開店中っぽいです。",
+    "泡がひとつ上って、お昼を知らせています。勝手に決めました。",
+    "お昼の時間を、丸い背中で受け止めています。",
+    "きょうの真ん中あたりを、泡が通過しました。",
+    "お昼のうちに、水槽のすみを点検しました。",
+    "お昼の水は、いつもの水です。念のため確認しました。"
+  ],
+  [
+    "ぼくの予定表は、まだほとんど空白です。",
+    "にぎやかなのは泡だけで、本人は静かです。",
+    "午後もこの調子で、じわじわ進みます。",
+    "本日の活動は、少し向きを変えたところです。",
+    "お昼につられて、半回転した気がします。",
+    "水草よりは動いていません。競争ではないので平気です。",
+    "見通しは良好。行き先は特にありません。",
+    "きょうの残りも、丸く収まる予定です。",
+    "光合成には参加しています。出席だけはしています。",
+    "昼下がりまで、のんびり営業しています。"
+  ]
+);
+
+const EVENING_DIALOGUES = buildCategory(
+  "evening",
+  [
+    "夕方になって、水槽の動きもゆっくりです。",
+    "一日の終わりが、水面に近づいてきました。",
+    "夜の手前で、泡が少しゆっくり見えます。気のせいかもしれません。",
+    "夕方になりました。お水には特に変化なしです。",
+    "水槽に時計はありませんが、夕方らしいです。",
+    "きょうの泡を、もうひとつ見送りました。何個目かは不明です。",
+    "夕方の水草は、いつもよりゆっくり揺れています。",
+    "夜が来る前に、小石と同じ場所で落ち着きました。",
+    "水槽のすみから、一日の終わりを見ています。見える範囲は水槽です。",
+    "きょうもそろそろ、静かな時間です。"
+  ],
+  [
+    "ぼくは先に、ひと休みの準備をしています。",
+    "一日ぶん、ちゃんと丸くいられました。",
+    "このあとは、水音を聞いてのんびりします。",
+    "夜の予定も、光合成以外は空いています。",
+    "泡が落ち着くまで、ここで見送ります。",
+    "きょうの出来事は、だいたい水の中でした。",
+    "夕方は、動かないのにちょうどいいです。",
+    "夕方のぶんも、静かに積み上がりました。",
+    "あとは水槽といっしょに、ゆっくり夜になります。",
+    "本日のまりも業務は、そろそろ丸く収まります。"
+  ]
+);
+
+const LATE_NIGHT_DIALOGUES = buildCategory(
+  "latenight",
+  [
+    "夜もずいぶん深くなりました。水槽は小さい音で営業中です。",
+    "遅い時間の水槽は、いつもよりゆっくり揺れています。",
+    "こんな時間の泡は、少し眠そうです。いつも同じ速さです。",
+    "深夜の水は、しんとしています。小石からも返事はありません。",
+    "夜でも部屋の様子はわかりません。水槽はいつもどおりです。",
+    "夜ふけのすみっこは、少しだけ秘密基地みたいです。",
+    "静かな時間になりました。水草も小声で揺れています。",
+    "時計の針は進んでいるらしいです。水槽からはよく見えません。",
+    "夜ふけの水槽に、新しいお水の音がしました。",
+    "朝にはまだ少し早いらしいです。水槽には時刻表がありません。"
+  ],
+  [
+    "ここでは、急がない係を担当しています。普段からです。",
+    "ぼくも静かに丸くしています。いつもとの違いは、時間だけです。",
+    "水槽のすみで、ほっとした顔をしています。顔はありません。",
+    "泡が落ち着くまで見ています。ぼくは先に落ち着いていました。",
+    "何も起きない夜です。起きても、たぶん泡です。",
+    "小さな泡ひとつぶん、力を抜いています。抜く前との差は不明です。",
+    "静けさに参加しています。特別な仕事はありません。",
+    "時間が進んでも、緑のままです。確認はできません。",
+    "実は、さっきまで寝ていました。いえ、寝ていません。見分け方はありません。",
+    "今夜の予定は、もう残っていません。最初から少なめでした。"
+  ]
+);
+
 const SPRING_DIALOGUES = buildCategory(
   "spring",
   [
@@ -338,6 +456,10 @@ const DIALOGUES_BY_CATEGORY: Readonly<
   bond: BOND_DIALOGUES,
   milestone: MILESTONE_DIALOGUES,
   large: LARGE_DIALOGUES,
+  morning: MORNING_DIALOGUES,
+  daytime: DAYTIME_DIALOGUES,
+  evening: EVENING_DIALOGUES,
+  latenight: LATE_NIGHT_DIALOGUES,
   spring: SPRING_DIALOGUES,
   summer: SUMMER_DIALOGUES,
   autumn: AUTUMN_DIALOGUES,
@@ -373,14 +495,25 @@ function seasonFor(wateredDate: string): DialogueCategory {
   return "winter";
 }
 
+function timeCategoryFor(wateredAt: Date): DialogueCategory {
+  const hour = jstHour(wateredAt);
+  if (hour >= 22 || hour < 5) return "latenight";
+  if (hour < 11) return "morning";
+  if (hour < 17) return "daytime";
+  return "evening";
+}
+
 function categoryFor(input: DialogueSelection): DialogueCategory {
+  const timeCategory = timeCategoryFor(input.wateredAt);
   if (input.isBirth) return "birth";
   if (isCareStreakMilestone(input.ageDays)) return "milestone";
+  if (timeCategory === "latenight") return timeCategory;
   if (input.ageDays <= 7) return "early";
 
   const categories: DialogueCategory[] = [
     "everyday",
-    seasonFor(input.wateredDate)
+    seasonFor(input.wateredDate),
+    timeCategory
   ];
   if (input.ageDays >= 30) categories.push("bond");
   if (input.sizeMm >= 50) categories.push("large");

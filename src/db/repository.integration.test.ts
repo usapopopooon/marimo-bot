@@ -193,6 +193,29 @@ suite("MarimoRepository integration", () => {
     ).toHaveLength(0);
   });
 
+  it("passes the watering time into contextual late-night dialogue selection", async () => {
+    const dialogueIds: string[] = [];
+    for (let day = 0; day < 8; day += 1) {
+      const result = await repository.water({
+        guildId: "1013",
+        userId: "2015",
+        channelId: "3013",
+        displayName: "夜ふかし組",
+        now: new Date(Date.UTC(2026, 7, 1 + day, 15)),
+        baseXp: 100
+      });
+      if (result.status !== "watered") throw new Error("expected watering");
+      if (result.watering.dialogueId === null)
+        throw new Error("expected dialogue");
+      dialogueIds.push(result.watering.dialogueId);
+    }
+
+    expect(dialogueIds[0]).toMatch(/^birth-/);
+    expect(dialogueIds[1]).toMatch(/^milestone-/);
+    expect(dialogueIds[3]).toMatch(/^latenight-/);
+    expect(dialogueIds[7]).toMatch(/^latenight-/);
+  });
+
   it("uses the exact Japanese midnight death boundary", async () => {
     const input = {
       guildId: "1002",

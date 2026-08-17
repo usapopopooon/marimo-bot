@@ -275,6 +275,7 @@ export class MarimoRepository {
         ageDays: currentAgeDays,
         sizeMm: currentSize,
         wateredDate: today,
+        wateredAt: input.now,
         recentDialogueIds: recentDialogues.rows.map((row) => row.dialogue_id)
       }).id;
       await client.query(
