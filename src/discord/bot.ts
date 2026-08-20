@@ -46,8 +46,13 @@ import {
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
   NAME_MODAL_ID,
+  MOSS_COLA_REVIVE_CANCEL_BUTTON_ID,
   MOSS_COLA_REVIVE_BUTTON_ID,
+  MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
+  mossColaRescueConfirmButtonId,
+  mossColaRescueConfirmTarget,
   mossColaRescueTarget,
+  mossColaRevivalConfirmation,
   rankingPanel,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
@@ -123,7 +128,12 @@ type ReminderChoice = { hour: WateringReminderHour | null };
 
 type MossColaRevivalTarget =
   | { ownerUserId: string; marimoId?: never; diedAt?: never }
-  | { ownerUserId: string; marimoId: string; diedAt: Date };
+  | {
+      ownerUserId: string;
+      marimoId: string;
+      diedAt: Date;
+      sourceMessageId: string;
+    };
 
 function reminderChoice(customId: string): ReminderChoice | null {
   if (customId === REMINDER_OFF_BUTTON_ID) return { hour: null };
@@ -279,10 +289,37 @@ export class MarimoBot {
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
       if (interaction.isButton()) {
+        if (interaction.customId === MOSS_COLA_REVIVE_CANCEL_BUTTON_ID) {
+          await interaction.update({
+            content: "復活をやめました。苔コーラは消費していません。",
+            components: []
+          });
+          return;
+        }
+        const rescueConfirmationTarget = mossColaRescueConfirmTarget(
+          interaction.customId
+        );
+        if (rescueConfirmationTarget !== null) {
+          if (await this.ensureMarimoAccess(interaction)) {
+            await this.handleMossColaRevive(
+              interaction,
+              rescueConfirmationTarget
+            );
+          }
+          return;
+        }
+        if (interaction.customId === MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID) {
+          if (await this.ensureMarimoAccess(interaction)) {
+            await this.handleMossColaRevive(interaction, {
+              ownerUserId: interaction.user.id
+            });
+          }
+          return;
+        }
         const rescueTarget = mossColaRescueTarget(interaction.customId);
         if (rescueTarget !== null) {
           if (await this.ensureMarimoAccess(interaction)) {
-            await this.handleMossColaRevive(interaction, rescueTarget);
+            await this.handleMossColaRevivalPrompt(interaction, rescueTarget);
           }
           return;
         }
@@ -320,7 +357,7 @@ export class MarimoBot {
         if (interaction.customId === REVIVE_BUTTON_ID)
           await this.handleRevive(interaction);
         if (interaction.customId === MOSS_COLA_REVIVE_BUTTON_ID)
-          await this.handleMossColaRevive(interaction, {
+          await this.handleMossColaRevivalPrompt(interaction, {
             ownerUserId: interaction.user.id
           });
         if (interaction.customId === REMINDER_BUTTON_ID)
@@ -599,21 +636,24 @@ export class MarimoBot {
     target: MossColaRevivalTarget
   ): Promise<void> {
     if (interaction.guildId === null) {
-      await interaction.reply({
+      await interaction.update({
         content: "サーバー内で利用してください。",
-        ephemeral: true
+        components: []
       });
       return;
     }
     if (!this.xpDelivery.itemRevivalEnabled) {
-      await interaction.reply({
+      await interaction.update({
         content: "現在、苔コーラを使った復活は利用できません。",
-        ephemeral: true
+        components: []
       });
       return;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.update({
+      content: "苔コーラを確認しています…",
+      components: []
+    });
     const guildId = interaction.guildId;
     const rescuerUserId = interaction.user.id;
     const now = new Date();
@@ -699,7 +739,7 @@ export class MarimoBot {
       });
       await interaction.editReply({
         content:
-          "復活に使える苔コーラがありません。コレクションに残す1本を除き、2本目以降の苔コーラが必要です。"
+          "復活に使える苔コーラがありません。**カフェ・コレクション**に残す1本を除き、2本目以降の苔コーラが必要です。"
       });
       return;
     }
@@ -733,9 +773,14 @@ export class MarimoBot {
       await this.runBestEffort(
         "Disable completed moss-cola rescue",
         async () => {
-          await interaction.message.edit({
+          const sourceMessage = await this.fetchMessage(
+            interaction.channelId,
+            target.sourceMessageId
+          );
+          if (sourceMessage === null) return;
+          await sourceMessage.edit({
             content: [
-              deathLogContent(preparation.death),
+              deathLogContent(preparation.death, false),
               "",
               `🫧 <@${rescuerUserId}> が <@${target.ownerUserId}> の **${displayMarimoName(revival.name)}** に苔コーラを与え、生き返らせました。`
             ].join("\n"),
@@ -751,6 +796,38 @@ export class MarimoBot {
         `第${revival.generation}世代｜飼育 **${revival.ageDays}日**｜**${revival.sizeMm.toFixed(2)} mm**`,
         `苔コーラを1本使いました｜残り **${spend.remainingCount}本**`
       ].join("\n")
+    });
+  }
+
+  private async handleMossColaRevivalPrompt(
+    interaction: ButtonInteraction,
+    target:
+      | { ownerUserId: string; marimoId?: never; diedAt?: never }
+      | { ownerUserId: string; marimoId: string; diedAt: Date }
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    if (!this.xpDelivery.itemRevivalEnabled) {
+      await interaction.reply({
+        content: "現在、苔コーラを使った復活は利用できません。",
+        ephemeral: true
+      });
+      return;
+    }
+
+    const isRescue = target.marimoId !== undefined;
+    const confirmButtonId = isRescue
+      ? mossColaRescueConfirmButtonId(target, interaction.message.id)
+      : MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID;
+    await interaction.reply({
+      ...mossColaRevivalConfirmation(confirmButtonId, isRescue),
+      ephemeral: true,
+      allowedMentions: { parse: [] }
     });
   }
 
@@ -1470,7 +1547,7 @@ export class MarimoBot {
         ? undefined
         : logNonce(options.deliveryKey);
     await channel.send({
-      content: deathLogContent(death),
+      content: deathLogContent(death, options.showRescueButton !== false),
       components:
         options.showRescueButton === false ? [] : deathLogComponents(death),
       files: [new AttachmentBuilder(image, { name: "marimo-memorial.png" })],

@@ -10,9 +10,14 @@ import {
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
   NAME_MODAL_ID,
+  MOSS_COLA_REVIVE_CANCEL_BUTTON_ID,
   MOSS_COLA_REVIVE_BUTTON_ID,
+  MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
   mossColaRescueButtonId,
+  mossColaRescueConfirmButtonId,
+  mossColaRescueConfirmTarget,
   mossColaRescueTarget,
+  mossColaRevivalConfirmation,
   rankingPanel,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
@@ -100,7 +105,8 @@ describe("Discord presentation", () => {
         "⚠️ **水替えを忘れると…**",
         "丸一日忘れると枯れてしまいます。",
         "枯れたまりもは **1,000 XP**で生き返らせることもできます。",
-        "または、コレクションに残す1本を除いた **苔コーラ**でも復活できます。",
+        "**苔コーラ**は、**カフェ・コレクション**で手に入るカードです。",
+        "2本以上持っていれば、コレクションに残す最初の1本を除いた重複分で復活できます。",
         "新しく育て直す場合は **100 XP**から再スタートします。"
       ].join("\n")
     );
@@ -162,6 +168,82 @@ describe("Discord presentation", () => {
       label: "苔コーラを与える"
     });
     expect(mossColaRescueTarget(`${customId}:extra`)).toBeNull();
+  });
+
+  it("explains moss-cola before the rescue button is pressed", () => {
+    const memorial = deathLogContent(deadEntry("2001", 1, 10.6));
+
+    expect(memorial).toContain("**カフェ・コレクション**で手に入るカード");
+    expect(memorial).toContain("2本目以降の重複分を1本使って");
+    expect(memorial).not.toContain("カフェガチャ");
+    expect(deathLogContent(deadEntry("2001", 1, 10.6), false)).not.toContain(
+      "苔コーラとは"
+    );
+  });
+
+  it("shows a private confirmation before consuming moss-cola", () => {
+    const selfConfirmation = mossColaRevivalConfirmation(
+      MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
+      false
+    );
+    const rescueTarget = mossColaRescueTarget(
+      mossColaRescueButtonId(deadEntry("2001", 1, 10.6))
+    );
+    expect(rescueTarget).not.toBeNull();
+    if (rescueTarget === null) return;
+    const rescueConfirmId = mossColaRescueConfirmButtonId(
+      rescueTarget,
+      "900000000000000000"
+    );
+    const rescueConfirmation = mossColaRevivalConfirmation(
+      rescueConfirmId,
+      true
+    );
+    const selfButtons = selfConfirmation.components[0]?.components.map(
+      (component) => component.toJSON()
+    );
+    const rescueButtons = rescueConfirmation.components[0]?.components.map(
+      (component) => component.toJSON()
+    );
+
+    expect(selfConfirmation.content).toContain("**カフェ・コレクション**");
+    expect(selfConfirmation.content).toContain("重複分を1本消費します");
+    expect(selfButtons).toContainEqual(
+      expect.objectContaining({
+        custom_id: MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
+        label: "復活させる"
+      })
+    );
+    expect(selfButtons).toContainEqual(
+      expect.objectContaining({
+        custom_id: MOSS_COLA_REVIVE_CANCEL_BUTTON_ID,
+        label: "やめる"
+      })
+    );
+    expect(rescueConfirmation.content).toContain("このまりもを助けますか");
+    expect(rescueButtons).toContainEqual(
+      expect.objectContaining({
+        custom_id: rescueConfirmId,
+        label: "苔コーラを与える"
+      })
+    );
+    expect(rescueConfirmId.length).toBeLessThanOrEqual(100);
+    expect(mossColaRescueConfirmTarget(rescueConfirmId)).toEqual({
+      ...rescueTarget,
+      sourceMessageId: "900000000000000000"
+    });
+    expect(mossColaRescueConfirmTarget(`${rescueConfirmId}:extra`)).toBeNull();
+
+    const maximumLengthId = mossColaRescueConfirmButtonId(
+      {
+        ownerUserId: "9".repeat(19),
+        marimoId: "8".repeat(19),
+        diedAt: new Date("9999-12-31T23:59:59.999Z")
+      },
+      "7".repeat(19)
+    );
+    expect(maximumLengthId.length).toBeLessThanOrEqual(100);
+    expect(mossColaRescueConfirmTarget(maximumLengthId)).not.toBeNull();
   });
 
   it("shows opt-in reminder times with OFF selected by default", () => {

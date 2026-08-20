@@ -29,8 +29,13 @@ import {
 import {
   NAME_BUTTON_ID,
   NAME_MODAL_ID,
+  MOSS_COLA_REVIVE_CANCEL_BUTTON_ID,
   MOSS_COLA_REVIVE_BUTTON_ID,
+  MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
   mossColaRescueButtonId,
+  mossColaRescueConfirmButtonId,
+  mossColaRescueConfirmTarget,
+  mossColaRescueTarget,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
   REMINDER_OFF_BUTTON_ID,
@@ -143,6 +148,7 @@ type WaterInteractionHarness = {
 
 type LogRefresher = {
   client: { user: { id: string } | null };
+  fetchMessage(channelId: string, messageId: string): Promise<Message | null>;
   repostAllLogs(interaction: ChatInputCommandInteraction): Promise<void>;
   findMarimoLogs(channel: TextChannel, botUserId: string): Promise<Message[]>;
   postWateringLogToChannel(
@@ -204,6 +210,15 @@ function logMessage(authorId: string, attachmentName: string): Message {
         predicate({ name: attachmentName })
     }
   } as unknown as Message;
+}
+
+function rescueConfirmationId(
+  dead: DeadMarimo,
+  sourceMessageId: string
+): string {
+  const target = mossColaRescueTarget(mossColaRescueButtonId(dead));
+  if (target === null) throw new Error("Expected a valid moss-cola target");
+  return mossColaRescueConfirmButtonId(target, sourceMessageId);
 }
 
 function logChannel(
@@ -347,6 +362,7 @@ describe("panel interaction wiring", () => {
       NAME_BUTTON_ID,
       REVIVE_BUTTON_ID,
       MOSS_COLA_REVIVE_BUTTON_ID,
+      MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
       REMINDER_BUTTON_ID,
       REMINDER_OFF_BUTTON_ID,
       `${REMINDER_HOUR_BUTTON_PREFIX}21`
@@ -760,6 +776,126 @@ describe("panel interaction wiring", () => {
     });
   });
 
+  it("explains moss-cola and asks before consuming it from the panel", async () => {
+    const prepareRevival = vi.fn();
+    const spendRevivalItem = vi.fn();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(
+      botWith(
+        {
+          getConfig: vi.fn().mockResolvedValue({
+            ...guildConfig,
+            waterPanelChannelId: "3001",
+            waterPanelMessageId: "4001"
+          }),
+          prepareRevival
+        },
+        { itemRevivalEnabled: true, spendRevivalItem }
+      ),
+      {
+        isButton: () => true,
+        customId: MOSS_COLA_REVIVE_BUTTON_ID,
+        guildId: "1001",
+        channelId: "3001",
+        message: { id: "4001" },
+        user: { id: "2001" },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([]),
+        reply
+      }
+    );
+
+    const payload = reply.mock.calls[0]?.[0] as
+      | {
+          content: string;
+          ephemeral: boolean;
+          components: { components: { toJSON(): { custom_id?: string } }[] }[];
+        }
+      | undefined;
+    expect(payload?.content).toContain("**カフェ・コレクション**");
+    expect(payload?.content).toContain("重複分を1本消費します");
+    expect(payload?.ephemeral).toBe(true);
+    expect(
+      payload?.components[0]?.components.map(
+        (component) => component.toJSON().custom_id
+      )
+    ).toContain(MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID);
+    expect(prepareRevival).not.toHaveBeenCalled();
+    expect(spendRevivalItem).not.toHaveBeenCalled();
+  });
+
+  it("keeps the source death log in the rescue confirmation", async () => {
+    const prepareRevival = vi.fn();
+    const spendRevivalItem = vi.fn();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(
+      botWith(
+        { prepareRevival },
+        { itemRevivalEnabled: true, spendRevivalItem }
+      ),
+      {
+        isButton: () => true,
+        customId: mossColaRescueButtonId(death),
+        guildId: "1001",
+        channelId: "log-channel",
+        message: { id: "900000000000000000" },
+        user: { id: "helper-user" },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([]),
+        reply
+      }
+    );
+
+    const payload = reply.mock.calls[0]?.[0] as
+      | {
+          content: string;
+          ephemeral: boolean;
+          components: { components: { toJSON(): { custom_id?: string } }[] }[];
+        }
+      | undefined;
+    const confirmId = payload?.components[0]?.components[0]?.toJSON().custom_id;
+    expect(payload?.content).toContain("このまりもを助けますか");
+    expect(payload?.ephemeral).toBe(true);
+    expect(confirmId).toBeDefined();
+    expect(mossColaRescueConfirmTarget(confirmId ?? "")).toMatchObject({
+      ownerUserId: "2001",
+      marimoId: death.id,
+      diedAt: death.diedAt,
+      sourceMessageId: "900000000000000000"
+    });
+    expect(prepareRevival).not.toHaveBeenCalled();
+    expect(spendRevivalItem).not.toHaveBeenCalled();
+  });
+
+  it("cancels moss-cola revival without consuming it", async () => {
+    const prepareRevival = vi.fn();
+    const spendRevivalItem = vi.fn();
+    const update = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(
+      botWith(
+        { prepareRevival },
+        { itemRevivalEnabled: true, spendRevivalItem }
+      ),
+      {
+        isButton: () => true,
+        customId: MOSS_COLA_REVIVE_CANCEL_BUTTON_ID,
+        guildId: "1001",
+        user: { id: "2001" },
+        update
+      }
+    );
+
+    expect(update).toHaveBeenCalledWith({
+      content: "復活をやめました。苔コーラは消費していません。",
+      components: []
+    });
+    expect(prepareRevival).not.toHaveBeenCalled();
+    expect(spendRevivalItem).not.toHaveBeenCalled();
+  });
+
   it("lets another user revive the exact logged death with a moss-cola duplicate", async () => {
     const eventId = "00000000-0000-4000-8000-000000000199";
     const requestedAt = new Date("2026-08-12T03:00:00Z");
@@ -792,18 +928,21 @@ describe("panel interaction wiring", () => {
       .fn()
       .mockResolvedValue(undefined);
     const editLog = vi.fn().mockResolvedValue(undefined);
+    const fetchMessage = vi.fn().mockResolvedValue({ edit: editLog });
+    (bot as unknown as LogRefresher).fetchMessage = fetchMessage;
     const editReply = vi.fn().mockResolvedValue(undefined);
+    const update = vi.fn().mockResolvedValue(undefined);
 
     await dispatch(bot, {
       isButton: () => true,
-      customId: mossColaRescueButtonId(death),
+      customId: rescueConfirmationId(death, "900000000000000000"),
       guildId: "1001",
       channelId: "log-channel",
-      message: { id: "death-message", edit: editLog },
+      message: { id: "confirmation-message" },
       user: { id: "helper-user", username: "helper", globalName: null },
       member: { roles: [] },
       memberPermissions: new PermissionsBitField([]),
-      deferReply: vi.fn().mockResolvedValue(undefined),
+      update,
       editReply
     });
 
@@ -833,13 +972,24 @@ describe("panel interaction wiring", () => {
       costXp: 0,
       now: expect.any(Date)
     });
+    expect(fetchMessage).toHaveBeenCalledWith(
+      "log-channel",
+      "900000000000000000"
+    );
     expect(editLog).toHaveBeenCalledWith({
       content: expect.stringContaining("<@helper-user> が <@2001>"),
       components: [],
       allowedMentions: { parse: [] }
     });
+    const editedLog = editLog.mock.calls[0]?.[0] as
+      { content: string } | undefined;
+    expect(editedLog?.content).not.toContain("苔コーラとは");
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining("苔コーラを1本使いました")
+    });
+    expect(update).toHaveBeenCalledWith({
+      content: "苔コーラを確認しています…",
+      components: []
     });
   });
 
@@ -855,14 +1005,14 @@ describe("panel interaction wiring", () => {
       ),
       {
         isButton: () => true,
-        customId: mossColaRescueButtonId(death),
+        customId: rescueConfirmationId(death, "900000000000000001"),
         guildId: "1001",
         channelId: "log-channel",
-        message: { id: "old-death-message", edit: vi.fn() },
+        message: { id: "confirmation-message" },
         user: { id: "helper-user", username: "helper", globalName: null },
         member: { roles: [] },
         memberPermissions: new PermissionsBitField([]),
-        deferReply: vi.fn().mockResolvedValue(undefined),
+        update: vi.fn().mockResolvedValue(undefined),
         editReply
       }
     );

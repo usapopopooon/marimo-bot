@@ -34,7 +34,12 @@ export const STATUS_BUTTON_ID = "marimo:status";
 export const NAME_BUTTON_ID = "marimo:name";
 export const REVIVE_BUTTON_ID = "marimo:revive";
 export const MOSS_COLA_REVIVE_BUTTON_ID = "marimo:revive:moss-cola";
+export const MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID =
+  "marimo:revive:moss-cola:confirm";
+export const MOSS_COLA_REVIVE_CANCEL_BUTTON_ID =
+  "marimo:revive:moss-cola:cancel";
 export const MOSS_COLA_RESCUE_BUTTON_PREFIX = "marimo:rescue:moss-cola:";
+const MOSS_COLA_RESCUE_CONFIRM_BUTTON_PREFIX = "marimo:mcrc:";
 export const REMINDER_BUTTON_ID = "marimo:reminder";
 export const REMINDER_OFF_BUTTON_ID = "marimo:reminder:off";
 export const REMINDER_HOUR_BUTTON_PREFIX = "marimo:reminder:hour:";
@@ -113,7 +118,8 @@ export function waterPanel(waterXp: number): {
             "⚠️ **水替えを忘れると…**",
             "丸一日忘れると枯れてしまいます。",
             `枯れたまりもは **${REVIVAL_COST_XP.toLocaleString("ja-JP")} XP**で生き返らせることもできます。`,
-            "または、コレクションに残す1本を除いた **苔コーラ**でも復活できます。",
+            "**苔コーラ**は、**カフェ・コレクション**で手に入るカードです。",
+            "2本以上持っていれば、コレクションに残す最初の1本を除いた重複分で復活できます。",
             `新しく育て直す場合は **${waterXp} XP**から再スタートします。`
           ].join("\n")
         )
@@ -299,22 +305,41 @@ export function wateringLogContent(watering: Watering): string {
   ].join("\n");
 }
 
-export function deathLogContent(death: DeadMarimo): string {
+export function deathLogContent(
+  death: DeadMarimo,
+  showRescueHelp = true
+): string {
   return [
     `🥀 **${displayMarimoName(death.ownerDisplayName)}**さんの **${displayMarimoName(death.name)}** は枯れてしまいました`,
-    `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
+    `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`,
+    ...(showRescueHelp
+      ? [
+          "",
+          "🫧 **苔コーラとは？**",
+          "**カフェ・コレクション**で手に入るカードです。",
+          "2本以上持っていれば、最初の1本を残し、2本目以降の重複分を1本使ってこのまりもを助けられます。"
+        ]
+      : [])
   ].join("\n");
 }
+
+export type MossColaRescueTarget = {
+  ownerUserId: string;
+  marimoId: string;
+  diedAt: Date;
+};
+
+export type MossColaRescueConfirmTarget = MossColaRescueTarget & {
+  sourceMessageId: string;
+};
 
 export function mossColaRescueButtonId(death: DeadMarimo): string {
   return `${MOSS_COLA_RESCUE_BUTTON_PREFIX}${death.userId}:${death.id}:${death.diedAt.getTime()}`;
 }
 
-export function mossColaRescueTarget(customId: string): {
-  ownerUserId: string;
-  marimoId: string;
-  diedAt: Date;
-} | null {
+export function mossColaRescueTarget(
+  customId: string
+): MossColaRescueTarget | null {
   if (!customId.startsWith(MOSS_COLA_RESCUE_BUTTON_PREFIX)) return null;
   const encoded = customId.slice(MOSS_COLA_RESCUE_BUTTON_PREFIX.length);
   const match = /^(\d+):(\d+):(\d+)$/.exec(encoded);
@@ -331,6 +356,63 @@ export function mossColaRescueTarget(customId: string): {
   const diedAt = new Date(diedAtMs);
   if (Number.isNaN(diedAt.getTime())) return null;
   return { ownerUserId, marimoId, diedAt };
+}
+
+export function mossColaRescueConfirmButtonId(
+  target: MossColaRescueTarget,
+  sourceMessageId: string
+): string {
+  return `${MOSS_COLA_RESCUE_CONFIRM_BUTTON_PREFIX}${target.ownerUserId}:${target.marimoId}:${target.diedAt.getTime()}:${sourceMessageId}`;
+}
+
+export function mossColaRescueConfirmTarget(
+  customId: string
+): MossColaRescueConfirmTarget | null {
+  if (!customId.startsWith(MOSS_COLA_RESCUE_CONFIRM_BUTTON_PREFIX)) return null;
+  const encoded = customId.slice(MOSS_COLA_RESCUE_CONFIRM_BUTTON_PREFIX.length);
+  const match = /^(\d+):(\d+):(\d+):(\d+)$/.exec(encoded);
+  if (match === null) return null;
+  const [, ownerUserId, marimoId, diedAtText, sourceMessageId] = match;
+  if (
+    ownerUserId === undefined ||
+    marimoId === undefined ||
+    diedAtText === undefined ||
+    sourceMessageId === undefined
+  )
+    return null;
+  const diedAtMs = Number(diedAtText);
+  if (!Number.isSafeInteger(diedAtMs)) return null;
+  const diedAt = new Date(diedAtMs);
+  if (Number.isNaN(diedAt.getTime())) return null;
+  return { ownerUserId, marimoId, diedAt, sourceMessageId };
+}
+
+export function mossColaRevivalConfirmation(
+  confirmButtonId: string,
+  isRescue: boolean
+): {
+  content: string;
+  components: ActionRowBuilder<ButtonBuilder>[];
+} {
+  return {
+    content: [
+      `**カフェ・コレクション**のカード「苔コーラ」を1本使って、${isRescue ? "このまりもを助けますか？" : "まりもを復活させますか？"}`,
+      "最初の1本はコレクションに残り、2本目以降の重複分を1本消費します。"
+    ].join("\n"),
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(confirmButtonId)
+          .setLabel(isRescue ? "苔コーラを与える" : "復活させる")
+          .setEmoji("🫧")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(MOSS_COLA_REVIVE_CANCEL_BUTTON_ID)
+          .setLabel("やめる")
+          .setStyle(ButtonStyle.Secondary)
+      )
+    ]
+  };
 }
 
 export function deathLogComponents(
