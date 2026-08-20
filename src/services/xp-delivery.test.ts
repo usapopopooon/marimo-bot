@@ -169,5 +169,59 @@ describe("XP delivery wiring", () => {
     );
 
     expect(delivery.revivalEnabled).toBe(true);
+    expect(delivery.itemRevivalEnabled).toBe(true);
+  });
+
+  it("consumes a moss-cola duplicate for the rescuer through the item endpoint", async () => {
+    const repository: XpRepository = {
+      pendingXp: vi.fn().mockResolvedValue([]),
+      markXpDelivered: vi.fn().mockResolvedValue(undefined),
+      markXpFailed: vi.fn().mockResolvedValue(undefined)
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        event_id: "00000000-0000-4000-8000-000000000199",
+        status: "consumed",
+        card_key: "moss-cola",
+        remaining_count: 1,
+        duplicate: false
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const delivery = new XpDelivery(
+      repository,
+      config(),
+      pino({ level: "silent" })
+    );
+
+    await expect(
+      delivery.spendRevivalItem({
+        eventId: "00000000-0000-4000-8000-000000000199",
+        guildId: "1001",
+        userId: "helper-user",
+        channelId: "3001",
+        observedAt: new Date("2026-08-11T03:00:00Z")
+      })
+    ).resolves.toEqual({
+      status: "consumed",
+      cardKey: "moss-cola",
+      remainingCount: 1,
+      duplicate: false
+    });
+
+    const call = fetchMock.mock.calls[0];
+    if (call === undefined || typeof call[1]?.body !== "string")
+      throw new Error("fetch was not called with JSON");
+    expect(call[0]).toBe(
+      "https://level.example.test/api/v1/integrations/marimo/revival-item-spends"
+    );
+    expect(JSON.parse(call[1].body)).toEqual({
+      event_id: "00000000-0000-4000-8000-000000000199",
+      guild_id: "1001",
+      user_id: "helper-user",
+      channel_id: "3001",
+      card_key: "moss-cola",
+      observed_at: "2026-08-11T03:00:00.000Z"
+    });
   });
 });

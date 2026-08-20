@@ -3,12 +3,16 @@ import { marimoDialogueText } from "../domain/dialogue.js";
 import type { DeadMarimo, RankingEntry } from "../domain/types.js";
 import {
   deadRankingPanel,
+  deathLogComponents,
   deathLogContent,
   isCareStreakMilestone,
   nameModal,
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
   NAME_MODAL_ID,
+  MOSS_COLA_REVIVE_BUTTON_ID,
+  mossColaRescueButtonId,
+  mossColaRescueTarget,
   rankingPanel,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
@@ -96,46 +100,68 @@ describe("Discord presentation", () => {
         "⚠️ **水替えを忘れると…**",
         "丸一日忘れると枯れてしまいます。",
         "枯れたまりもは **1,000 XP**で生き返らせることもできます。",
+        "または、コレクションに残す1本を除いた **苔コーラ**でも復活できます。",
         "新しく育て直す場合は **100 XP**から再スタートします。"
       ].join("\n")
     );
     expect(embed?.footer?.text).toBe("日付は日本時間の0:00に切り替わります");
-    expect(panel.components[0]?.components).toHaveLength(5);
-    expect(
-      panel.components[0]?.components.map((component) => component.toJSON())
-    ).toContainEqual(expect.objectContaining({ custom_id: NAME_BUTTON_ID }));
-    expect(
-      panel.components[0]?.components.map((component) => component.toJSON())
-    ).toContainEqual(
+    expect(panel.components).toHaveLength(2);
+    expect(panel.components[0]?.components).toHaveLength(4);
+    expect(panel.components[1]?.components).toHaveLength(2);
+    const panelButtons = panel.components.flatMap((row) =>
+      row.components.map((component) => component.toJSON())
+    );
+    expect(panelButtons).toContainEqual(
+      expect.objectContaining({ custom_id: NAME_BUTTON_ID })
+    );
+    expect(panelButtons).toContainEqual(
       expect.objectContaining({
         custom_id: WATER_BUTTON_ID,
         label: "育て始める・水を替える"
       })
     );
-    expect(
-      panel.components[0]?.components.map((component) => component.toJSON())
-    ).toContainEqual(
+    expect(panelButtons).toContainEqual(
       expect.objectContaining({
         custom_id: STATUS_BUTTON_ID,
         label: "自分のまりもを見る"
       })
     );
-    expect(
-      panel.components[0]?.components.map((component) => component.toJSON())
-    ).toContainEqual(
+    expect(panelButtons).toContainEqual(
       expect.objectContaining({
         custom_id: REVIVE_BUTTON_ID,
         label: "1,000 XPで復活"
       })
     );
-    expect(
-      panel.components[0]?.components.map((component) => component.toJSON())
-    ).toContainEqual(
+    expect(panelButtons).toContainEqual(
+      expect.objectContaining({
+        custom_id: MOSS_COLA_REVIVE_BUTTON_ID,
+        label: "苔コーラで生き返らせる"
+      })
+    );
+    expect(panelButtons).toContainEqual(
       expect.objectContaining({
         custom_id: REMINDER_BUTTON_ID,
         label: "水換え通知"
       })
     );
+  });
+
+  it("encodes the exact death in the moss-cola rescue button", () => {
+    const dead = deadEntry("2001", 1, 10.6);
+    const customId = mossColaRescueButtonId(dead);
+    const components = deathLogComponents(dead);
+
+    expect(customId.length).toBeLessThanOrEqual(100);
+    expect(mossColaRescueTarget(customId)).toEqual({
+      ownerUserId: "2001",
+      marimoId: "2001",
+      diedAt: dead.diedAt
+    });
+    expect(components[0]?.components[0]?.toJSON()).toMatchObject({
+      custom_id: customId,
+      label: "苔コーラを与える"
+    });
+    expect(mossColaRescueTarget(`${customId}:extra`)).toBeNull();
   });
 
   it("shows opt-in reminder times with OFF selected by default", () => {

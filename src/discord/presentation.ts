@@ -33,6 +33,8 @@ export const WATER_BUTTON_ID = "marimo:water";
 export const STATUS_BUTTON_ID = "marimo:status";
 export const NAME_BUTTON_ID = "marimo:name";
 export const REVIVE_BUTTON_ID = "marimo:revive";
+export const MOSS_COLA_REVIVE_BUTTON_ID = "marimo:revive:moss-cola";
+export const MOSS_COLA_RESCUE_BUTTON_PREFIX = "marimo:rescue:moss-cola:";
 export const REMINDER_BUTTON_ID = "marimo:reminder";
 export const REMINDER_OFF_BUTTON_ID = "marimo:reminder:off";
 export const REMINDER_HOUR_BUTTON_PREFIX = "marimo:reminder:hour:";
@@ -56,7 +58,7 @@ export function waterPanel(waterXp: number): {
   flags: [];
 } {
   const maximumXp = Math.max(waterXp, MAX_WATER_XP);
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const mainRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(WATER_BUTTON_ID)
       .setLabel("育て始める・水を替える")
@@ -71,15 +73,22 @@ export function waterPanel(waterXp: number): {
       .setLabel("名前をつける")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
+      .setCustomId(REMINDER_BUTTON_ID)
+      .setLabel("水換え通知")
+      .setEmoji("🔔")
+      .setStyle(ButtonStyle.Secondary)
+  );
+  const revivalRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
       .setCustomId(REVIVE_BUTTON_ID)
       .setLabel(`${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活`)
       .setEmoji("🌿")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId(REMINDER_BUTTON_ID)
-      .setLabel("水換え通知")
-      .setEmoji("🔔")
-      .setStyle(ButtonStyle.Secondary)
+      .setCustomId(MOSS_COLA_REVIVE_BUTTON_ID)
+      .setLabel("苔コーラで生き返らせる")
+      .setEmoji("🫧")
+      .setStyle(ButtonStyle.Success)
   );
   return {
     content: "",
@@ -104,12 +113,13 @@ export function waterPanel(waterXp: number): {
             "⚠️ **水替えを忘れると…**",
             "丸一日忘れると枯れてしまいます。",
             `枯れたまりもは **${REVIVAL_COST_XP.toLocaleString("ja-JP")} XP**で生き返らせることもできます。`,
+            "または、コレクションに残す1本を除いた **苔コーラ**でも復活できます。",
             `新しく育て直す場合は **${waterXp} XP**から再スタートします。`
           ].join("\n")
         )
         .setFooter({ text: "日付は日本時間の0:00に切り替わります" })
     ],
-    components: [row],
+    components: [mainRow, revivalRow],
     flags: []
   };
 }
@@ -294,4 +304,45 @@ export function deathLogContent(death: DeadMarimo): string {
     `🥀 **${displayMarimoName(death.ownerDisplayName)}**さんの **${displayMarimoName(death.name)}** は枯れてしまいました`,
     `第${death.generation}世代｜最終サイズ **${death.finalSizeMm.toFixed(2)} mm**`
   ].join("\n");
+}
+
+export function mossColaRescueButtonId(death: DeadMarimo): string {
+  return `${MOSS_COLA_RESCUE_BUTTON_PREFIX}${death.userId}:${death.id}:${death.diedAt.getTime()}`;
+}
+
+export function mossColaRescueTarget(customId: string): {
+  ownerUserId: string;
+  marimoId: string;
+  diedAt: Date;
+} | null {
+  if (!customId.startsWith(MOSS_COLA_RESCUE_BUTTON_PREFIX)) return null;
+  const encoded = customId.slice(MOSS_COLA_RESCUE_BUTTON_PREFIX.length);
+  const match = /^(\d+):(\d+):(\d+)$/.exec(encoded);
+  if (match === null) return null;
+  const [, ownerUserId, marimoId, diedAtText] = match;
+  if (
+    ownerUserId === undefined ||
+    marimoId === undefined ||
+    diedAtText === undefined
+  )
+    return null;
+  const diedAtMs = Number(diedAtText);
+  if (!Number.isSafeInteger(diedAtMs)) return null;
+  const diedAt = new Date(diedAtMs);
+  if (Number.isNaN(diedAt.getTime())) return null;
+  return { ownerUserId, marimoId, diedAt };
+}
+
+export function deathLogComponents(
+  death: DeadMarimo
+): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(mossColaRescueButtonId(death))
+        .setLabel("苔コーラを与える")
+        .setEmoji("🫧")
+        .setStyle(ButtonStyle.Success)
+    )
+  ];
 }

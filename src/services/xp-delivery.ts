@@ -15,6 +15,13 @@ export type RevivalSpendResult = {
   duplicate: boolean;
 };
 
+export type RevivalItemSpendResult = {
+  status: "consumed" | "insufficient_item";
+  cardKey: "moss-cola";
+  remainingCount: number;
+  duplicate: boolean;
+};
+
 export class XpDelivery {
   private readonly inFlight = new Set<string>();
 
@@ -32,6 +39,10 @@ export class XpDelivery {
     return this.revivalUrl() !== undefined;
   }
 
+  public get itemRevivalEnabled(): boolean {
+    return this.itemRevivalUrl() !== undefined;
+  }
+
   private revivalUrl(): string | undefined {
     if (this.config.XP_REVIVAL_URL !== undefined)
       return this.config.XP_REVIVAL_URL;
@@ -41,6 +52,18 @@ export class XpDelivery {
     url.pathname = url.pathname.replace(
       /\/watering-events$/,
       "/revival-spends"
+    );
+    return url.toString();
+  }
+
+  private itemRevivalUrl(): string | undefined {
+    const revivalUrl = this.revivalUrl();
+    if (revivalUrl === undefined) return undefined;
+    const url = new URL(revivalUrl);
+    if (!url.pathname.endsWith("/revival-spends")) return undefined;
+    url.pathname = url.pathname.replace(
+      /\/revival-spends$/,
+      "/revival-item-spends"
     );
     return url.toString();
   }
@@ -94,6 +117,60 @@ export class XpDelivery {
       status: body.status,
       costXp: body.cost_xp,
       remainingXp: body.remaining_xp,
+      duplicate: body.duplicate
+    };
+  }
+
+  public async spendRevivalItem(input: {
+    eventId: string;
+    guildId: string;
+    userId: string;
+    channelId: string;
+    observedAt: Date;
+  }): Promise<RevivalItemSpendResult> {
+    const url = this.itemRevivalUrl();
+    if (url === undefined)
+      throw new Error("Moss-cola revival integration is disabled");
+    const headers: Record<string, string> = {
+      "content-type": "application/json"
+    };
+    if (this.config.XP_WEBHOOK_TOKEN !== undefined) {
+      headers.authorization = `Bearer ${this.config.XP_WEBHOOK_TOKEN}`;
+    }
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        event_id: input.eventId,
+        guild_id: input.guildId,
+        user_id: input.userId,
+        channel_id: input.channelId,
+        card_key: "moss-cola",
+        observed_at: input.observedAt.toISOString()
+      }),
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok)
+      throw new Error(`Moss-cola revival API returned HTTP ${response.status}`);
+    const body: unknown = await response.json();
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("status" in body) ||
+      (body.status !== "consumed" && body.status !== "insufficient_item") ||
+      !("card_key" in body) ||
+      body.card_key !== "moss-cola" ||
+      !("remaining_count" in body) ||
+      typeof body.remaining_count !== "number" ||
+      !("duplicate" in body) ||
+      typeof body.duplicate !== "boolean"
+    ) {
+      throw new Error("Moss-cola revival API returned an invalid response");
+    }
+    return {
+      status: body.status,
+      cardKey: body.card_key,
+      remainingCount: body.remaining_count,
       duplicate: body.duplicate
     };
   }

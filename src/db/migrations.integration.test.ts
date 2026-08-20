@@ -480,4 +480,113 @@ suite("database migration upgrade", () => {
       await admin.end();
     }
   });
+
+  it("backfills XP revivals and allows zero-cost moss-cola revivals", async () => {
+    const admin = new Pool({ connectionString: databaseUrl });
+    const schema = "marimo_moss_cola_revival_upgrade_test";
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`
+    });
+
+    try {
+      for (const migration of [
+        "001_initial.sql",
+        "002_watering_log_delivery.sql",
+        "003_xp_compensation.sql",
+        "004_watering_birth.sql",
+        "005_xp_delivery_fairness.sql",
+        "006_calendar_day_growth.sql",
+        "007_allowed_roles.sql",
+        "008_marimo_revival.sql",
+        "009_lower_revival_cost.sql",
+        "010_watering_dialogue.sql",
+        "011_dead_ranking_panel.sql",
+        "012_watering_reminders.sql"
+      ]) {
+        await pool.query(
+          await readFile(
+            resolve(process.cwd(), "migrations", migration),
+            "utf8"
+          )
+        );
+      }
+      const marimo = await pool.query<{ id: string }>(
+        `INSERT INTO marimos (
+           guild_id, user_id, generation, owner_display_name, name,
+           born_at, last_watered_at, last_watered_date,
+           died_at, final_size_mm, death_reason
+         ) VALUES ('1001', 'owner', 1, '持ち主', 'まりも',
+                   '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10',
+                   '2026-08-12T15:00:00Z', 10.6, 'missed-care')
+         RETURNING id`
+      );
+      const marimoId = marimo.rows[0]?.id;
+      if (marimoId === undefined) throw new Error("expected marimo row");
+      await pool.query(
+        `INSERT INTO marimo_revivals (
+           event_id, marimo_id, guild_id, user_id, channel_id,
+           generation, owner_display_name, name, born_at,
+           last_watered_at, last_watered_date, died_at, final_size_mm,
+           requested_at
+         ) VALUES (
+           '00000000-0000-4000-8000-000000000291', $1,
+           '1001', 'owner', '3001', 1, '持ち主', 'まりも',
+           '2026-08-10T03:00:00Z', '2026-08-10T03:00:00Z', '2026-08-10',
+           '2026-08-12T15:00:00Z', 10.6, '2026-08-13T03:00:00Z'
+         )`,
+        [marimoId]
+      );
+
+      await pool.query(
+        await readFile(
+          resolve(process.cwd(), "migrations", "013_moss_cola_revival.sql"),
+          "utf8"
+        )
+      );
+
+      const backfilled = await pool.query<{
+        payment_method: string;
+        rescuer_user_id: string;
+        cost_xp: number;
+      }>(
+        `SELECT payment_method, rescuer_user_id, cost_xp
+         FROM marimo_revivals
+         WHERE event_id = '00000000-0000-4000-8000-000000000291'`
+      );
+      expect(backfilled.rows).toEqual([
+        { payment_method: "xp", rescuer_user_id: "owner", cost_xp: 1000 }
+      ]);
+      await pool.query(
+        `UPDATE marimo_revivals
+         SET status = 'completed'
+         WHERE event_id = '00000000-0000-4000-8000-000000000291'`
+      );
+
+      await expect(
+        pool.query(
+          `INSERT INTO marimo_revivals (
+             event_id, marimo_id, guild_id, user_id, rescuer_user_id,
+             channel_id, payment_method, cost_xp,
+             generation, owner_display_name, name, born_at,
+             last_watered_at, last_watered_date, died_at, final_size_mm,
+             requested_at
+           ) VALUES (
+             '00000000-0000-4000-8000-000000000292', $1,
+             '1001', 'owner', 'helper', '3001', 'moss-cola', 0,
+             1, '持ち主', 'まりも', '2026-08-10T03:00:00Z',
+             '2026-08-10T03:00:00Z', '2026-08-10',
+             '2026-08-12T15:00:00Z', 10.6, '2026-08-13T04:00:00Z'
+           )`,
+          [marimoId]
+        )
+      ).resolves.toBeDefined();
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
 });

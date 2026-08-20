@@ -29,6 +29,8 @@ import {
 import {
   NAME_BUTTON_ID,
   NAME_MODAL_ID,
+  MOSS_COLA_REVIVE_BUTTON_ID,
+  mossColaRescueButtonId,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
   REMINDER_OFF_BUTTON_ID,
@@ -151,7 +153,11 @@ type LogRefresher = {
   postDeathLogToChannel(
     channel: TextChannel,
     death: DeadMarimo,
-    options: { notifyOwner: boolean; deliveryKey?: string }
+    options: {
+      notifyOwner: boolean;
+      deliveryKey?: string;
+      showRescueButton?: boolean;
+    }
   ): Promise<void>;
 };
 
@@ -340,6 +346,7 @@ describe("panel interaction wiring", () => {
       STATUS_BUTTON_ID,
       NAME_BUTTON_ID,
       REVIVE_BUTTON_ID,
+      MOSS_COLA_REVIVE_BUTTON_ID,
       REMINDER_BUTTON_ID,
       REMINDER_OFF_BUTTON_ID,
       `${REMINDER_HOUR_BUTTON_PREFIX}21`
@@ -738,8 +745,9 @@ describe("panel interaction wiring", () => {
     expect(completeRevival).toHaveBeenCalledWith({
       eventId,
       guildId: "1001",
-      userId: "2001",
-      displayName: "owner",
+      ownerUserId: "2001",
+      rescuerUserId: "2001",
+      paymentMethod: "xp",
       costXp: 1000,
       now: expect.any(Date)
     });
@@ -749,6 +757,120 @@ describe("panel interaction wiring", () => {
         "第1世代｜飼育 **1日**｜**10.01 mm**",
         "**-1,000 XP**｜残り **250 XP**"
       ].join("\n")
+    });
+  });
+
+  it("lets another user revive the exact logged death with a moss-cola duplicate", async () => {
+    const eventId = "00000000-0000-4000-8000-000000000199";
+    const requestedAt = new Date("2026-08-12T03:00:00Z");
+    const prepareRevival = vi.fn().mockResolvedValue({
+      status: "ready",
+      eventId,
+      channelId: "log-channel",
+      requestedAt,
+      death,
+      newlyDied: false
+    });
+    const completeRevival = vi.fn().mockResolvedValue({
+      ...living,
+      eventId,
+      costXp: 0,
+      ageDays: 1,
+      sizeMm: 10.01
+    });
+    const spendRevivalItem = vi.fn().mockResolvedValue({
+      status: "consumed",
+      cardKey: "moss-cola",
+      remainingCount: 1,
+      duplicate: false
+    });
+    const bot = botWith(
+      { prepareRevival, completeRevival },
+      { itemRevivalEnabled: true, spendRevivalItem }
+    );
+    (bot as unknown as WaterInteractionHarness).updateRankings = vi
+      .fn()
+      .mockResolvedValue(undefined);
+    const editLog = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: mossColaRescueButtonId(death),
+      guildId: "1001",
+      channelId: "log-channel",
+      message: { id: "death-message", edit: editLog },
+      user: { id: "helper-user", username: "helper", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
+
+    expect(prepareRevival).toHaveBeenCalledWith({
+      guildId: "1001",
+      ownerUserId: "2001",
+      rescuerUserId: "helper-user",
+      channelId: "log-channel",
+      paymentMethod: "moss-cola",
+      expectedMarimoId: death.id,
+      expectedDiedAt: death.diedAt,
+      now: expect.any(Date)
+    });
+    expect(spendRevivalItem).toHaveBeenCalledWith({
+      eventId,
+      guildId: "1001",
+      userId: "helper-user",
+      channelId: "log-channel",
+      observedAt: requestedAt
+    });
+    expect(completeRevival).toHaveBeenCalledWith({
+      eventId,
+      guildId: "1001",
+      ownerUserId: "2001",
+      rescuerUserId: "helper-user",
+      paymentMethod: "moss-cola",
+      costXp: 0,
+      now: expect.any(Date)
+    });
+    expect(editLog).toHaveBeenCalledWith({
+      content: expect.stringContaining("<@helper-user> が <@2001>"),
+      components: [],
+      allowedMentions: { parse: [] }
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("苔コーラを1本使いました")
+    });
+  });
+
+  it("does not consume moss-cola from a stale death log", async () => {
+    const spendRevivalItem = vi.fn();
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    await dispatch(
+      botWith(
+        {
+          prepareRevival: vi.fn().mockResolvedValue({ status: "stale-death" })
+        },
+        { itemRevivalEnabled: true, spendRevivalItem }
+      ),
+      {
+        isButton: () => true,
+        customId: mossColaRescueButtonId(death),
+        guildId: "1001",
+        channelId: "log-channel",
+        message: { id: "old-death-message", edit: vi.fn() },
+        user: { id: "helper-user", username: "helper", globalName: null },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([]),
+        deferReply: vi.fn().mockResolvedValue(undefined),
+        editReply
+      }
+    );
+
+    expect(spendRevivalItem).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledWith({
+      content:
+        "この死亡記録は古いため復活できません。苔コーラは消費していません。"
     });
   });
 
@@ -800,7 +922,9 @@ describe("panel interaction wiring", () => {
     expect(cancelRevival).toHaveBeenCalledWith({
       eventId,
       guildId: "1001",
-      userId: "2001"
+      ownerUserId: "2001",
+      rescuerUserId: "2001",
+      paymentMethod: "xp"
     });
     expect(editReply).toHaveBeenCalledWith({
       content: "復活には **1,000 XP** 必要です。現在は **999 XP** です。"
@@ -1002,7 +1126,7 @@ describe("panel interaction wiring", () => {
       components: unknown[];
     };
     expect(payload.embeds[0]?.data.title).toBe("🟢 まりもちゃん");
-    expect(payload.components).toHaveLength(1);
+    expect(payload.components).toHaveLength(2);
   });
 
   it("converts the existing ranking panel to an embed during update", async () => {
@@ -1239,12 +1363,14 @@ describe("panel interaction wiring", () => {
 
     const memorial = send.mock.calls[2]?.[0] as {
       content: string;
+      components: unknown[];
       allowedMentions: { parse: string[]; users?: string[] };
       nonce?: string;
       enforceNonce?: boolean;
     };
     expect(memorial.content).toContain("枯れてしまいました");
     expect(memorial.content).not.toContain("<@2001>");
+    expect(memorial.components).toHaveLength(1);
     expect(memorial.allowedMentions).toEqual({ parse: [] });
     expect(memorial.nonce).toHaveLength(25);
     expect(memorial.nonce).not.toBe(milestone.nonce);
@@ -1337,6 +1463,7 @@ describe("panel interaction wiring", () => {
       setLogChannel: vi.fn().mockResolvedValue(undefined),
       wateringLogHistory: vi.fn().mockResolvedValue([watering, laterWatering]),
       deathLogHistory: vi.fn().mockResolvedValue([death]),
+      revivableDeathKeys: vi.fn().mockResolvedValue(new Set()),
       markGuildWateringLogsDeliveredThrough: vi
         .fn()
         .mockResolvedValue(undefined)
@@ -1374,7 +1501,8 @@ describe("panel interaction wiring", () => {
       { notifyOwner: false }
     );
     expect(postDeathLogToChannel).toHaveBeenCalledWith(channel, death, {
-      notifyOwner: false
+      notifyOwner: false,
+      showRescueButton: false
     });
     expect(postWateringLogToChannel).toHaveBeenNthCalledWith(
       2,
@@ -1437,7 +1565,8 @@ describe("panel interaction wiring", () => {
     const repository: Partial<MarimoRepository> = {
       setLogChannel,
       wateringLogHistory: vi.fn().mockResolvedValue([watering]),
-      deathLogHistory: vi.fn().mockResolvedValue([])
+      deathLogHistory: vi.fn().mockResolvedValue([]),
+      revivableDeathKeys: vi.fn().mockResolvedValue(new Set())
     };
     const bot = botWith(repository) as unknown as LogRefresher;
     Object.defineProperty(bot.client, "user", { value: { id: "bot" } });

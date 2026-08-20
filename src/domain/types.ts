@@ -41,9 +41,13 @@ export type WaterResult =
   | { status: "revival-pending" }
   | { status: "watered"; watering: Watering; death?: DeadMarimo };
 
+export type RevivalPaymentMethod = "xp" | "moss-cola";
+
 export type RevivalPreparation =
   | { status: "alive" }
   | { status: "no-dead-marimo" }
+  | { status: "stale-death" }
+  | { status: "in-progress" }
   | {
       status: "ready";
       eventId: string;
@@ -56,6 +60,8 @@ export type RevivalPreparation =
 export type Revival = RankingEntry & {
   eventId: string;
   costXp: number;
+  paymentMethod: RevivalPaymentMethod;
+  rescuerUserId: string;
 };
 
 export type RankingEntry = LivingMarimo & {

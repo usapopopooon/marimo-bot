@@ -510,14 +510,18 @@ suite("MarimoRepository integration", () => {
 
     const first = await repository.prepareRevival({
       guildId: input.guildId,
-      userId: input.userId,
+      ownerUserId: input.userId,
+      rescuerUserId: input.userId,
       channelId: input.channelId,
+      paymentMethod: "xp",
       now: new Date("2026-08-14T03:00:00Z")
     });
     const retry = await repository.prepareRevival({
       guildId: input.guildId,
-      userId: input.userId,
+      ownerUserId: input.userId,
+      rescuerUserId: input.userId,
       channelId: input.channelId,
+      paymentMethod: "xp",
       now: new Date("2026-08-14T04:00:00Z")
     });
     expect(first.status).toBe("ready");
@@ -540,8 +544,9 @@ suite("MarimoRepository integration", () => {
     const revived = await repository.completeRevival({
       eventId: first.eventId,
       guildId: input.guildId,
-      userId: input.userId,
-      displayName: input.displayName,
+      ownerUserId: input.userId,
+      rescuerUserId: input.userId,
+      paymentMethod: "xp",
       costXp: 1000,
       now: new Date("2026-08-14T03:00:00Z")
     });
@@ -555,8 +560,9 @@ suite("MarimoRepository integration", () => {
     const completedAgain = await repository.completeRevival({
       eventId: first.eventId,
       guildId: input.guildId,
-      userId: input.userId,
-      displayName: input.displayName,
+      ownerUserId: input.userId,
+      rescuerUserId: input.userId,
+      paymentMethod: "xp",
       costXp: 1000,
       now: new Date("2026-08-14T03:00:00Z")
     });
@@ -596,8 +602,10 @@ suite("MarimoRepository integration", () => {
     );
     const preparation = await repository.prepareRevival({
       guildId: input.guildId,
-      userId: input.userId,
+      ownerUserId: input.userId,
+      rescuerUserId: input.userId,
       channelId: input.channelId,
+      paymentMethod: "xp",
       now: new Date("2026-08-12T03:00:00Z")
     });
     if (preparation.status !== "ready")
@@ -605,7 +613,9 @@ suite("MarimoRepository integration", () => {
     await repository.cancelRevival({
       eventId: preparation.eventId,
       guildId: input.guildId,
-      userId: input.userId
+      ownerUserId: input.userId,
+      rescuerUserId: input.userId,
+      paymentMethod: "xp"
     });
 
     const next = await repository.water({
@@ -615,5 +625,86 @@ suite("MarimoRepository integration", () => {
     expect(next.status).toBe("watered");
     if (next.status !== "watered") throw new Error("expected watering");
     expect(next.watering.marimo.generation).toBe(2);
+  });
+
+  it("binds a moss-cola rescue to one helper and the exact death", async () => {
+    const input = {
+      guildId: "1010",
+      userId: "owner-2011",
+      channelId: "3010",
+      displayName: "持ち主",
+      baseXp: 100
+    };
+    await repository.water({
+      ...input,
+      now: new Date("2026-08-10T03:00:00Z")
+    });
+    const death = await repository.expireOne(
+      input.guildId,
+      input.userId,
+      new Date("2026-08-11T15:00:00Z")
+    );
+    if (death === null) throw new Error("expected death");
+    expect(await repository.revivableDeathKeys(input.guildId)).toEqual(
+      new Set([`${death.id}:${death.diedAt.toISOString()}`])
+    );
+
+    await expect(
+      repository.prepareRevival({
+        guildId: input.guildId,
+        ownerUserId: input.userId,
+        rescuerUserId: "helper-a",
+        channelId: input.channelId,
+        paymentMethod: "moss-cola",
+        expectedMarimoId: death.id,
+        expectedDiedAt: new Date(death.diedAt.getTime() - 1),
+        now: new Date("2026-08-12T03:00:00Z")
+      })
+    ).resolves.toEqual({ status: "stale-death" });
+
+    const prepared = await repository.prepareRevival({
+      guildId: input.guildId,
+      ownerUserId: input.userId,
+      rescuerUserId: "helper-a",
+      channelId: input.channelId,
+      paymentMethod: "moss-cola",
+      expectedMarimoId: death.id,
+      expectedDiedAt: death.diedAt,
+      now: new Date("2026-08-12T03:00:00Z")
+    });
+    if (prepared.status !== "ready")
+      throw new Error("expected revival preparation");
+
+    await expect(
+      repository.prepareRevival({
+        guildId: input.guildId,
+        ownerUserId: input.userId,
+        rescuerUserId: "helper-b",
+        channelId: input.channelId,
+        paymentMethod: "moss-cola",
+        expectedMarimoId: death.id,
+        expectedDiedAt: death.diedAt,
+        now: new Date("2026-08-12T03:01:00Z")
+      })
+    ).resolves.toEqual({ status: "in-progress" });
+
+    const revived = await repository.completeRevival({
+      eventId: prepared.eventId,
+      guildId: input.guildId,
+      ownerUserId: input.userId,
+      rescuerUserId: "helper-a",
+      paymentMethod: "moss-cola",
+      costXp: 0,
+      now: new Date("2026-08-12T03:02:00Z")
+    });
+    expect(revived).toMatchObject({
+      id: death.id,
+      ownerDisplayName: "持ち主",
+      generation: 1,
+      costXp: 0
+    });
+    expect(await repository.revivableDeathKeys(input.guildId)).toEqual(
+      new Set()
+    );
   });
 });

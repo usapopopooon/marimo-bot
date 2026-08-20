@@ -31,12 +31,14 @@ import type {
 import { REVIVAL_COST_XP, wateringXp } from "../domain/rewards.js";
 import { renderLivingTankImage, renderTankImage } from "../rendering/tank.js";
 import type {
+  RevivalItemSpendResult,
   RevivalSpendResult,
   XpDelivery
 } from "../services/xp-delivery.js";
 import { commands } from "./commands.js";
 import {
   deadRankingPanel,
+  deathLogComponents,
   deathLogContent,
   displayMarimoName,
   isCareStreakMilestone,
@@ -44,6 +46,8 @@ import {
   NAME_BUTTON_ID,
   NAME_INPUT_ID,
   NAME_MODAL_ID,
+  MOSS_COLA_REVIVE_BUTTON_ID,
+  mossColaRescueTarget,
   rankingPanel,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
@@ -91,7 +95,12 @@ const MARIMO_LOG_FILES = new Set(["marimo-tank.png", "marimo-memorial.png"]);
 type LogPostOptions = {
   notifyOwner: boolean;
   deliveryKey?: string;
+  showRescueButton?: boolean;
 };
+
+function deathKey(death: DeadMarimo): string {
+  return `${death.id}:${death.diedAt.toISOString()}`;
+}
 
 function logNonce(deliveryKey: string): string {
   return createHash("sha256").update(deliveryKey).digest("hex").slice(0, 25);
@@ -111,6 +120,10 @@ type PermissionChecker = {
 };
 
 type ReminderChoice = { hour: WateringReminderHour | null };
+
+type MossColaRevivalTarget =
+  | { ownerUserId: string; marimoId?: never; diedAt?: never }
+  | { ownerUserId: string; marimoId: string; diedAt: Date };
 
 function reminderChoice(customId: string): ReminderChoice | null {
   if (customId === REMINDER_OFF_BUTTON_ID) return { hour: null };
@@ -266,6 +279,13 @@ export class MarimoBot {
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
       if (interaction.isButton()) {
+        const rescueTarget = mossColaRescueTarget(interaction.customId);
+        if (rescueTarget !== null) {
+          if (await this.ensureMarimoAccess(interaction)) {
+            await this.handleMossColaRevive(interaction, rescueTarget);
+          }
+          return;
+        }
         const selectedReminder = reminderChoice(interaction.customId);
         if (selectedReminder !== null) {
           if (await this.ensureMarimoAccess(interaction)) {
@@ -278,6 +298,7 @@ export class MarimoBot {
           STATUS_BUTTON_ID,
           NAME_BUTTON_ID,
           REVIVE_BUTTON_ID,
+          MOSS_COLA_REVIVE_BUTTON_ID,
           REMINDER_BUTTON_ID
         ].includes(interaction.customId);
         if (
@@ -298,6 +319,10 @@ export class MarimoBot {
           await this.handleNameButton(interaction);
         if (interaction.customId === REVIVE_BUTTON_ID)
           await this.handleRevive(interaction);
+        if (interaction.customId === MOSS_COLA_REVIVE_BUTTON_ID)
+          await this.handleMossColaRevive(interaction, {
+            ownerUserId: interaction.user.id
+          });
         if (interaction.customId === REMINDER_BUTTON_ID)
           await this.handleReminderButton(interaction);
         return;
@@ -400,7 +425,8 @@ export class MarimoBot {
     });
     if (result.status === "revival-pending") {
       await interaction.editReply({
-        content: `復活処理が途中です。「${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活」をもう一度押してください。XPは二重に消費されません。`
+        content:
+          "復活処理が途中です。先に押した復活ボタンをもう一度押してください。支払いは二重になりません。"
       });
       return;
     }
@@ -463,8 +489,10 @@ export class MarimoBot {
     const now = new Date();
     const preparation = await this.repository.prepareRevival({
       guildId,
-      userId,
+      ownerUserId: userId,
+      rescuerUserId: userId,
       channelId: interaction.channelId,
+      paymentMethod: "xp",
       now
     });
     if (preparation.status === "alive") {
@@ -474,6 +502,18 @@ export class MarimoBot {
     if (preparation.status === "no-dead-marimo") {
       await interaction.editReply({
         content: "生き返らせられるまりもがいません。"
+      });
+      return;
+    }
+    if (preparation.status === "in-progress") {
+      await interaction.editReply({
+        content: "このまりもは別の復活処理が進行中です。"
+      });
+      return;
+    }
+    if (preparation.status === "stale-death") {
+      await interaction.editReply({
+        content: "この死亡記録は古いため復活できません。"
       });
       return;
     }
@@ -510,7 +550,9 @@ export class MarimoBot {
       await this.repository.cancelRevival({
         eventId: preparation.eventId,
         guildId,
-        userId
+        ownerUserId: userId,
+        rescuerUserId: userId,
+        paymentMethod: "xp"
       });
       await interaction.editReply({
         content: `復活には **${spend.costXp.toLocaleString("ja-JP")} XP** 必要です。現在は **${spend.remainingXp.toLocaleString("ja-JP")} XP** です。`
@@ -523,8 +565,9 @@ export class MarimoBot {
       revival = await this.repository.completeRevival({
         eventId: preparation.eventId,
         guildId,
-        userId,
-        displayName: displayName(interaction),
+        ownerUserId: userId,
+        rescuerUserId: userId,
+        paymentMethod: "xp",
         costXp: spend.costXp,
         now: new Date()
       });
@@ -547,6 +590,166 @@ export class MarimoBot {
         `🌿 **${displayMarimoName(revival.name)}** が生き返りました。`,
         `第${revival.generation}世代｜飼育 **${revival.ageDays}日**｜**${revival.sizeMm.toFixed(2)} mm**`,
         `**-${revival.costXp.toLocaleString("ja-JP")} XP**｜残り **${spend.remainingXp.toLocaleString("ja-JP")} XP**`
+      ].join("\n")
+    });
+  }
+
+  private async handleMossColaRevive(
+    interaction: ButtonInteraction,
+    target: MossColaRevivalTarget
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内で利用してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    if (!this.xpDelivery.itemRevivalEnabled) {
+      await interaction.reply({
+        content: "現在、苔コーラを使った復活は利用できません。",
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    const guildId = interaction.guildId;
+    const rescuerUserId = interaction.user.id;
+    const now = new Date();
+    const preparation = await this.repository.prepareRevival({
+      guildId,
+      ownerUserId: target.ownerUserId,
+      rescuerUserId,
+      channelId: interaction.channelId,
+      paymentMethod: "moss-cola",
+      ...(target.marimoId === undefined
+        ? {}
+        : {
+            expectedMarimoId: target.marimoId,
+            expectedDiedAt: target.diedAt
+          }),
+      now
+    });
+    if (preparation.status === "alive") {
+      await interaction.editReply({
+        content:
+          "このまりもはすでに元気に生きています。苔コーラは消費していません。"
+      });
+      return;
+    }
+    if (preparation.status === "no-dead-marimo") {
+      await interaction.editReply({
+        content:
+          "生き返らせられるまりもがいません。苔コーラは消費していません。"
+      });
+      return;
+    }
+    if (preparation.status === "stale-death") {
+      await interaction.editReply({
+        content:
+          "この死亡記録は古いため復活できません。苔コーラは消費していません。"
+      });
+      return;
+    }
+    if (preparation.status === "in-progress") {
+      await interaction.editReply({
+        content:
+          "このまりもは別の復活処理が進行中です。苔コーラは消費していません。"
+      });
+      return;
+    }
+
+    if (preparation.newlyDied) {
+      await this.runBestEffort("Death log before moss-cola revival", () =>
+        this.postDeathLog(preparation.death)
+      );
+      await this.runBestEffort("Ranking update before moss-cola revival", () =>
+        this.updateRankings(guildId, now)
+      );
+    }
+
+    let spend: RevivalItemSpendResult;
+    try {
+      spend = await this.xpDelivery.spendRevivalItem({
+        eventId: preparation.eventId,
+        guildId,
+        userId: rescuerUserId,
+        channelId: preparation.channelId,
+        observedAt: preparation.requestedAt
+      });
+    } catch (error) {
+      this.logger.warn(
+        { error: errorDetails(error), eventId: preparation.eventId },
+        "Moss-cola revival request failed"
+      );
+      await interaction.editReply({
+        content:
+          "苔コーラの確認が完了しませんでした。同じボタンをもう一度押してください。苔コーラは二重に消費されません。"
+      });
+      return;
+    }
+    if (spend.status === "insufficient_item") {
+      await this.repository.cancelRevival({
+        eventId: preparation.eventId,
+        guildId,
+        ownerUserId: target.ownerUserId,
+        rescuerUserId,
+        paymentMethod: "moss-cola"
+      });
+      await interaction.editReply({
+        content:
+          "復活に使える苔コーラがありません。コレクションに残す1本を除き、2本目以降の苔コーラが必要です。"
+      });
+      return;
+    }
+
+    let revival: Revival;
+    try {
+      revival = await this.repository.completeRevival({
+        eventId: preparation.eventId,
+        guildId,
+        ownerUserId: target.ownerUserId,
+        rescuerUserId,
+        paymentMethod: "moss-cola",
+        costXp: 0,
+        now: new Date()
+      });
+    } catch (error) {
+      this.logger.error(
+        { error: errorDetails(error), eventId: preparation.eventId },
+        "Revival completion failed after moss-cola consumption"
+      );
+      await interaction.editReply({
+        content:
+          "苔コーラの使用は記録されていますが、復活の確定が途中です。同じボタンをもう一度押すと追加消費なしで再開します。"
+      });
+      return;
+    }
+    await this.runBestEffort("Ranking update after moss-cola revival", () =>
+      this.updateRankings(guildId, new Date())
+    );
+    if (target.marimoId !== undefined) {
+      await this.runBestEffort(
+        "Disable completed moss-cola rescue",
+        async () => {
+          await interaction.message.edit({
+            content: [
+              deathLogContent(preparation.death),
+              "",
+              `🫧 <@${rescuerUserId}> が <@${target.ownerUserId}> の **${displayMarimoName(revival.name)}** に苔コーラを与え、生き返らせました。`
+            ].join("\n"),
+            components: [],
+            allowedMentions: { parse: [] }
+          });
+        }
+      );
+    }
+    await interaction.editReply({
+      content: [
+        `🫧 **${displayMarimoName(revival.name)}** が生き返りました。`,
+        `第${revival.generation}世代｜飼育 **${revival.ageDays}日**｜**${revival.sizeMm.toFixed(2)} mm**`,
+        `苔コーラを1本使いました｜残り **${spend.remainingCount}本**`
       ].join("\n")
     });
   }
@@ -937,9 +1140,10 @@ export class MarimoBot {
     }
 
     const oldLogs = await this.findMarimoLogs(channel, botUserId);
-    const [waterings, deaths] = await Promise.all([
+    const [waterings, deaths, revivableDeathKeys] = await Promise.all([
       this.repository.wateringLogHistory(interaction.guildId, startedAt),
-      this.repository.deathLogHistory(interaction.guildId, startedAt)
+      this.repository.deathLogHistory(interaction.guildId, startedAt),
+      this.repository.revivableDeathKeys(interaction.guildId)
     ]);
     const history = [
       ...waterings.map((watering) => ({
@@ -952,7 +1156,10 @@ export class MarimoBot {
       ...deaths.map((death) => ({
         at: death.diedAt,
         post: () =>
-          this.postDeathLogToChannel(channel, death, { notifyOwner: false })
+          this.postDeathLogToChannel(channel, death, {
+            notifyOwner: false,
+            showRescueButton: revivableDeathKeys.has(deathKey(death))
+          })
       }))
     ].sort((left, right) => left.at.getTime() - right.at.getTime());
     for (const event of history) {
@@ -1264,6 +1471,8 @@ export class MarimoBot {
         : logNonce(options.deliveryKey);
     await channel.send({
       content: deathLogContent(death),
+      components:
+        options.showRescueButton === false ? [] : deathLogComponents(death),
       files: [new AttachmentBuilder(image, { name: "marimo-memorial.png" })],
       allowedMentions: options.notifyOwner
         ? { parse: [], users: [death.userId] }
