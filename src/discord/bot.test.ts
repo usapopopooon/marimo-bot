@@ -27,6 +27,7 @@ import {
   missingPanelPermissions
 } from "./bot.js";
 import {
+  deathLogComponents,
   deathLogContent,
   NAME_BUTTON_ID,
   NAME_MODAL_ID,
@@ -42,7 +43,8 @@ import {
   REMINDER_OFF_BUTTON_ID,
   REVIVE_BUTTON_ID,
   STATUS_BUTTON_ID,
-  WATER_BUTTON_ID
+  WATER_BUTTON_ID,
+  xpRescueButtonId
 } from "./presentation.js";
 
 const config: Config = {
@@ -109,6 +111,7 @@ type RankingUpdater = {
   updateRankings(guildId: string, now: Date): Promise<void>;
   refreshRankingPanels(): Promise<void>;
   refreshWaterPanels(): Promise<void>;
+  refreshDeathLogRescueButtons(): Promise<void>;
   editRanking(
     channelId: string | null,
     messageId: string | null,
@@ -378,6 +381,7 @@ describe("panel interaction wiring", () => {
       REVIVE_BUTTON_ID,
       MOSS_COLA_REVIVE_BUTTON_ID,
       MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
+      xpRescueButtonId(death),
       REMINDER_BUTTON_ID,
       REMINDER_OFF_BUTTON_ID,
       `${REMINDER_HOUR_BUTTON_PREFIX}21`
@@ -859,6 +863,135 @@ describe("panel interaction wiring", () => {
         "第1世代｜飼育 **1日**｜**10.01 mm**",
         "**-1,000 XP**｜残り **250 XP**"
       ].join("\n")
+    });
+  });
+
+  it.each([
+    ["the owner", "2001", "<@2001> が **まりも** を"],
+    [
+      "another user",
+      "helper-user",
+      "<@helper-user> が <@2001> の **まりも** を"
+    ]
+  ])(
+    "lets %s use the same death-log button and pay 1,000 XP",
+    async (_case, rescuerUserId, expectedLogText) => {
+      const eventId = `00000000-0000-4000-8000-${rescuerUserId === "2001" ? "000000000299" : "000000000399"}`;
+      const requestedAt = new Date("2026-08-12T03:00:00Z");
+      const prepareRevival = vi.fn().mockResolvedValue({
+        status: "ready",
+        eventId,
+        channelId: "log-channel",
+        requestedAt,
+        death,
+        newlyDied: false
+      });
+      const spendRevival = vi.fn().mockResolvedValue({
+        status: "charged",
+        costXp: 1000,
+        remainingXp: 250,
+        duplicate: false
+      });
+      const completeRevival = vi.fn().mockResolvedValue({
+        ...living,
+        eventId,
+        costXp: 1000,
+        ageDays: 1,
+        sizeMm: 10.01
+      });
+      const bot = botWith(
+        { prepareRevival, completeRevival },
+        { revivalEnabled: true, spendRevival }
+      );
+      const harness = bot as unknown as WaterInteractionHarness;
+      harness.updateRankings = vi.fn().mockResolvedValue(undefined);
+      const editLog = vi.fn().mockResolvedValue(undefined);
+      harness.fetchMessage = vi.fn().mockResolvedValue({ edit: editLog });
+      const editReply = vi.fn().mockResolvedValue(undefined);
+
+      await dispatch(bot, {
+        isButton: () => true,
+        customId: xpRescueButtonId(death),
+        guildId: "1001",
+        channelId: "log-channel",
+        message: { id: "death-message" },
+        user: { id: rescuerUserId, username: "rescuer", globalName: null },
+        member: { roles: [] },
+        memberPermissions: new PermissionsBitField([]),
+        deferReply: vi.fn().mockResolvedValue(undefined),
+        editReply
+      });
+
+      expect(prepareRevival).toHaveBeenCalledWith({
+        guildId: "1001",
+        ownerUserId: "2001",
+        rescuerUserId,
+        channelId: "log-channel",
+        paymentMethod: "xp",
+        expectedMarimoId: death.id,
+        expectedDiedAt: death.diedAt,
+        now: expect.any(Date)
+      });
+      expect(spendRevival).toHaveBeenCalledWith({
+        eventId,
+        guildId: "1001",
+        userId: rescuerUserId,
+        channelId: "log-channel",
+        observedAt: requestedAt
+      });
+      expect(completeRevival).toHaveBeenCalledWith({
+        eventId,
+        guildId: "1001",
+        ownerUserId: "2001",
+        rescuerUserId,
+        paymentMethod: "xp",
+        costXp: 1000,
+        now: expect.any(Date)
+      });
+      expect(editLog).toHaveBeenCalledWith({
+        content: expect.stringContaining(expectedLogText),
+        components: [],
+        allowedMentions: { parse: [] }
+      });
+      expect(editReply).toHaveBeenCalledWith({
+        content: expect.stringContaining("**-1,000 XP**")
+      });
+    }
+  );
+
+  it("does not charge XP from an obsolete death-log button", async () => {
+    const spendRevival = vi.fn();
+    const editLog = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith(
+      { prepareRevival: vi.fn().mockResolvedValue({ status: "alive" }) },
+      { revivalEnabled: true, spendRevival }
+    );
+    (bot as unknown as WaterInteractionHarness).fetchMessage = vi
+      .fn()
+      .mockResolvedValue({ content: deathLogContent(death), edit: editLog });
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: xpRescueButtonId(death),
+      guildId: "1001",
+      channelId: "log-channel",
+      message: { id: "death-message" },
+      user: { id: "helper-user", username: "helper", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
+
+    expect(spendRevival).not.toHaveBeenCalled();
+    expect(editLog).toHaveBeenCalledWith({
+      content: deathLogContent(death, false),
+      components: []
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content:
+        "持ち主には現在育成中のまりもがいるため、この死亡記録からは復活できません。XPは消費していません。"
     });
   });
 
@@ -1447,6 +1580,37 @@ describe("panel interaction wiring", () => {
     };
     expect(payload.embeds[0]?.data.title).toBe("🟢 まりもちゃん");
     expect(payload.components).toHaveLength(2);
+  });
+
+  it("adds both rescue buttons to an existing revivable death log on startup", async () => {
+    const deathLogHistory = vi.fn().mockResolvedValue([death]);
+    const revivableDeathKeys = vi
+      .fn()
+      .mockResolvedValue(
+        new Set([`${death.id}:${death.diedAt.toISOString()}`])
+      );
+    const latestDeathLogMessage = vi.fn().mockResolvedValue({
+      channelId: "log-channel",
+      messageId: "death-message"
+    });
+    const bot = botWith({
+      deathLogHistory,
+      revivableDeathKeys,
+      latestDeathLogMessage
+    }) as unknown as RankingUpdater;
+    bot.client.guilds.cache.set("1001", {});
+    const edit = vi.fn().mockResolvedValue(undefined);
+    bot.fetchMessage = vi.fn().mockResolvedValue({ edit });
+
+    await bot.refreshDeathLogRescueButtons();
+
+    expect(deathLogHistory).toHaveBeenCalledWith("1001", expect.any(Date));
+    expect(latestDeathLogMessage).toHaveBeenCalledWith("1001", "2001");
+    expect(edit).toHaveBeenCalledWith({
+      content: deathLogContent(death),
+      components: deathLogComponents(death),
+      allowedMentions: { parse: [] }
+    });
   });
 
   it("converts the existing ranking panel to an embed during update", async () => {

@@ -38,6 +38,7 @@ export const MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID =
   "marimo:revive:moss-cola:confirm";
 export const MOSS_COLA_REVIVE_CANCEL_BUTTON_ID =
   "marimo:revive:moss-cola:cancel";
+export const XP_RESCUE_BUTTON_PREFIX = "marimo:rescue:xp:";
 export const MOSS_COLA_RESCUE_BUTTON_PREFIX = "marimo:rescue:moss-cola:";
 const MOSS_COLA_RESCUE_CONFIRM_BUTTON_PREFIX = "marimo:mcrc:";
 export const REMINDER_BUTTON_ID = "marimo:reminder";
@@ -315,22 +316,34 @@ export function deathLogContent(
     ...(showRescueHelp
       ? [
           "",
-          "🫧 **苔コーラとは？**",
-          "**カフェ・コレクション**で手に入るカードです。",
+          "🌿 **生き返らせるには？**",
+          `「${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活」は、ボタンを押した人の **${REVIVAL_COST_XP.toLocaleString("ja-JP")} XP**を使います。`,
+          "「苔コーラを与える」は、**カフェ・コレクション**で手に入るカードを使います。",
           "2本以上持っていれば、最初の1本を残し、2本目以降の重複分を1本使ってこのまりもを助けられます。"
         ]
       : [])
   ].join("\n");
 }
 
-export function removeMossColaRescueHelp(content: string): string {
-  const rescueHelp = [
-    "🫧 **苔コーラとは？**",
-    "**カフェ・コレクション**で手に入るカードです。",
-    "2本以上持っていれば、最初の1本を残し、2本目以降の重複分を1本使ってこのまりもを助けられます。"
-  ].join("\n");
-  const suffix = `\n\n${rescueHelp}`;
-  return content.endsWith(suffix) ? content.slice(0, -suffix.length) : content;
+export function removeDeathLogRescueHelp(content: string): string {
+  const rescueHelpCandidates = [
+    [
+      "🌿 **生き返らせるには？**",
+      `「${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活」は、ボタンを押した人の **${REVIVAL_COST_XP.toLocaleString("ja-JP")} XP**を使います。`,
+      "「苔コーラを与える」は、**カフェ・コレクション**で手に入るカードを使います。",
+      "2本以上持っていれば、最初の1本を残し、2本目以降の重複分を1本使ってこのまりもを助けられます。"
+    ],
+    [
+      "🫧 **苔コーラとは？**",
+      "**カフェ・コレクション**で手に入るカードです。",
+      "2本以上持っていれば、最初の1本を残し、2本目以降の重複分を1本使ってこのまりもを助けられます。"
+    ]
+  ];
+  for (const rescueHelpLines of rescueHelpCandidates) {
+    const suffix = `\n\n${rescueHelpLines.join("\n")}`;
+    if (content.endsWith(suffix)) return content.slice(0, -suffix.length);
+  }
+  return content;
 }
 
 export type MossColaRescueTarget = {
@@ -338,6 +351,8 @@ export type MossColaRescueTarget = {
   marimoId: string;
   diedAt: Date;
 };
+
+export type XpRescueTarget = MossColaRescueTarget;
 
 export type MossColaRescueConfirmTarget = MossColaRescueTarget & {
   sourceMessageId: string;
@@ -347,11 +362,34 @@ export function mossColaRescueButtonId(death: DeadMarimo): string {
   return `${MOSS_COLA_RESCUE_BUTTON_PREFIX}${death.userId}:${death.id}:${death.diedAt.getTime()}`;
 }
 
+export function xpRescueButtonId(death: DeadMarimo): string {
+  return `${XP_RESCUE_BUTTON_PREFIX}${death.userId}:${death.id}:${death.diedAt.getTime()}`;
+}
+
 export function mossColaRescueTarget(
   customId: string
 ): MossColaRescueTarget | null {
   if (!customId.startsWith(MOSS_COLA_RESCUE_BUTTON_PREFIX)) return null;
   const encoded = customId.slice(MOSS_COLA_RESCUE_BUTTON_PREFIX.length);
+  const match = /^(\d+):(\d+):(\d+)$/.exec(encoded);
+  if (match === null) return null;
+  const [, ownerUserId, marimoId, diedAtText] = match;
+  if (
+    ownerUserId === undefined ||
+    marimoId === undefined ||
+    diedAtText === undefined
+  )
+    return null;
+  const diedAtMs = Number(diedAtText);
+  if (!Number.isSafeInteger(diedAtMs)) return null;
+  const diedAt = new Date(diedAtMs);
+  if (Number.isNaN(diedAt.getTime())) return null;
+  return { ownerUserId, marimoId, diedAt };
+}
+
+export function xpRescueTarget(customId: string): XpRescueTarget | null {
+  if (!customId.startsWith(XP_RESCUE_BUTTON_PREFIX)) return null;
+  const encoded = customId.slice(XP_RESCUE_BUTTON_PREFIX.length);
   const match = /^(\d+):(\d+):(\d+)$/.exec(encoded);
   if (match === null) return null;
   const [, ownerUserId, marimoId, diedAtText] = match;
@@ -430,6 +468,11 @@ export function deathLogComponents(
 ): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(xpRescueButtonId(death))
+        .setLabel(`${REVIVAL_COST_XP.toLocaleString("ja-JP")} XPで復活`)
+        .setEmoji("🌿")
+        .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(mossColaRescueButtonId(death))
         .setLabel("苔コーラを与える")

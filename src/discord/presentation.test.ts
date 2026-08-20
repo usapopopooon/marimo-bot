@@ -19,7 +19,7 @@ import {
   mossColaRescueTarget,
   mossColaRevivalConfirmation,
   rankingPanel,
-  removeMossColaRescueHelp,
+  removeDeathLogRescueHelp,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
   REMINDER_OFF_BUTTON_ID,
@@ -30,7 +30,9 @@ import {
   wateringReminderContent,
   wateringReminderSettings,
   waterPanel,
-  WATER_BUTTON_ID
+  WATER_BUTTON_ID,
+  xpRescueButtonId,
+  xpRescueTarget
 } from "./presentation.js";
 
 function entry(userId: string, age: number, size: number): RankingEntry {
@@ -153,38 +155,62 @@ describe("Discord presentation", () => {
     );
   });
 
-  it("encodes the exact death in the moss-cola rescue button", () => {
+  it("shows matching XP and moss-cola buttons for the exact logged death", () => {
     const dead = deadEntry("2001", 1, 10.6);
-    const customId = mossColaRescueButtonId(dead);
+    const xpCustomId = xpRescueButtonId(dead);
+    const mossColaCustomId = mossColaRescueButtonId(dead);
     const components = deathLogComponents(dead);
 
-    expect(customId.length).toBeLessThanOrEqual(100);
-    expect(mossColaRescueTarget(customId)).toEqual({
+    expect(xpCustomId.length).toBeLessThanOrEqual(100);
+    expect(xpRescueTarget(xpCustomId)).toEqual({
       ownerUserId: "2001",
       marimoId: "2001",
       diedAt: dead.diedAt
     });
     expect(components[0]?.components[0]?.toJSON()).toMatchObject({
-      custom_id: customId,
+      custom_id: xpCustomId,
+      label: "1,000 XPで復活",
+      style: 3
+    });
+    expect(mossColaCustomId.length).toBeLessThanOrEqual(100);
+    expect(mossColaRescueTarget(mossColaCustomId)).toEqual({
+      ownerUserId: "2001",
+      marimoId: "2001",
+      diedAt: dead.diedAt
+    });
+    expect(components[0]?.components[1]?.toJSON()).toMatchObject({
+      custom_id: mossColaCustomId,
       label: "苔コーラを与える"
     });
-    expect(mossColaRescueTarget(`${customId}:extra`)).toBeNull();
+    expect(xpRescueTarget(`${xpCustomId}:extra`)).toBeNull();
+    expect(mossColaRescueTarget(`${mossColaCustomId}:extra`)).toBeNull();
   });
 
-  it("explains moss-cola before the rescue button is pressed", () => {
+  it("explains both rescue payments before a death-log button is pressed", () => {
     const memorial = deathLogContent(deadEntry("2001", 1, 10.6));
 
+    expect(memorial).toContain("ボタンを押した人の **1,000 XP**");
     expect(memorial).toContain("**カフェ・コレクション**で手に入るカード");
     expect(memorial).toContain("2本目以降の重複分を1本使って");
     expect(memorial).not.toContain("カフェガチャ");
     expect(deathLogContent(deadEntry("2001", 1, 10.6), false)).not.toContain(
-      "苔コーラとは"
+      "生き返らせるには"
     );
-    expect(removeMossColaRescueHelp(memorial)).toBe(
+    expect(removeDeathLogRescueHelp(memorial)).toBe(
       deathLogContent(deadEntry("2001", 1, 10.6), false)
     );
-    expect(removeMossColaRescueHelp("以前の形式のログ")).toBe(
+    expect(removeDeathLogRescueHelp("以前の形式のログ")).toBe(
       "以前の形式のログ"
+    );
+    const legacyMemorial = [
+      deathLogContent(deadEntry("2001", 1, 10.6), false),
+      "",
+      "🫧 **苔コーラとは？**",
+      "**カフェ・コレクション**で手に入るカードです。",
+      "2本以上持っていれば、最初の1本を残し、2本目以降の重複分を1本使ってこのまりもを助けられます。"
+    ].join("\n");
+    expect(removeDeathLogRescueHelp(legacyMemorial)).toBe(
+      deathLogContent(deadEntry("2001", 1, 10.6), false)
     );
   });
 
