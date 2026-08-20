@@ -27,6 +27,7 @@ import {
   missingPanelPermissions
 } from "./bot.js";
 import {
+  deathLogContent,
   NAME_BUTTON_ID,
   NAME_MODAL_ID,
   MOSS_COLA_REVIVE_CANCEL_BUTTON_ID,
@@ -132,7 +133,10 @@ type WateringLogDeliverer = {
 type LiveLogPoster = {
   client: Client;
   postWateringLog(watering: Watering): Promise<void>;
-  postDeathLog(death: DeadMarimo): Promise<void>;
+  postDeathLog(
+    death: DeadMarimo,
+    options?: { showRescueButton?: boolean }
+  ): Promise<void>;
 };
 
 type ReminderDeliverer = {
@@ -142,6 +146,12 @@ type ReminderDeliverer = {
 
 type WaterInteractionHarness = {
   deliverWateringLog(watering: Watering): Promise<void>;
+  postDeathLog(
+    death: DeadMarimo,
+    options?: { showRescueButton?: boolean }
+  ): Promise<void>;
+  disablePreviousDeathRescue(guildId: string, userId: string): Promise<void>;
+  fetchMessage(channelId: string, messageId: string): Promise<Message | null>;
   updateRankings(guildId: string, now: Date): Promise<void>;
   runInBackground(operation: string, task: () => Promise<void>): void;
 };
@@ -188,6 +198,8 @@ function botWith(
     {
       allowedRoleIds: vi.fn().mockResolvedValue([]),
       getWateringReminderHour: vi.fn().mockResolvedValue(null),
+      latestDeathLogMessage: vi.fn().mockResolvedValue(null),
+      recordDeathLogMessage: vi.fn().mockResolvedValue(undefined),
       ...repository
     } as MarimoRepository,
     xpDelivery as XpDelivery,
@@ -247,7 +259,10 @@ function textChannelWithSend(
   const channel = Object.create(TextChannel.prototype) as TextChannel;
   Object.defineProperties(channel, {
     id: { value: "3001" },
-    send: { value: send },
+    send: {
+      value: async (...args: unknown[]) =>
+        (await send(...args)) ?? { id: "test-message" }
+    },
     permissionsFor: {
       value: () => new PermissionsBitField(flags)
     }
@@ -697,6 +712,77 @@ describe("panel interaction wiring", () => {
     });
   });
 
+  it("posts a death without a rescue button when watering starts the next generation", async () => {
+    const nextGeneration: Watering = {
+      ...watering,
+      marimo: { ...living, id: "2", generation: 2 },
+      isBirth: true
+    };
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue({
+        ...guildConfig,
+        waterPanelChannelId: "3001",
+        waterPanelMessageId: "4001"
+      }),
+      water: vi.fn().mockResolvedValue({
+        status: "watered",
+        watering: nextGeneration,
+        death
+      })
+    });
+    const harness = bot as unknown as WaterInteractionHarness;
+    const postDeathLog = vi.fn().mockResolvedValue(undefined);
+    const disablePreviousDeathRescue = vi.fn().mockResolvedValue(undefined);
+    harness.postDeathLog = postDeathLog;
+    harness.disablePreviousDeathRescue = disablePreviousDeathRescue;
+    harness.deliverWateringLog = vi.fn().mockResolvedValue(undefined);
+    harness.updateRankings = vi.fn().mockResolvedValue(undefined);
+    harness.runInBackground = vi.fn();
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: WATER_BUTTON_ID,
+      guildId: "1001",
+      channelId: "3001",
+      message: { id: "4001" },
+      user: { id: "2001", username: "owner", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      deferReply: vi.fn().mockResolvedValue(undefined),
+      editReply: vi.fn().mockResolvedValue(undefined)
+    });
+
+    expect(postDeathLog).toHaveBeenCalledWith(death, {
+      showRescueButton: false
+    });
+    expect(disablePreviousDeathRescue).toHaveBeenCalledWith("1001", "2001");
+  });
+
+  it("disables the stored death-log rescue when a new generation starts", async () => {
+    const editLog = vi.fn().mockResolvedValue(undefined);
+    const latestDeathLogMessage = vi.fn().mockResolvedValue({
+      channelId: "log-channel",
+      messageId: "death-message"
+    });
+    const harness = botWith({
+      latestDeathLogMessage
+    }) as unknown as WaterInteractionHarness;
+    const fetchMessage = vi.fn().mockResolvedValue({
+      content: deathLogContent(death),
+      edit: editLog
+    });
+    harness.fetchMessage = fetchMessage;
+
+    await harness.disablePreviousDeathRescue("1001", "2001");
+
+    expect(latestDeathLogMessage).toHaveBeenCalledWith("1001", "2001");
+    expect(fetchMessage).toHaveBeenCalledWith("log-channel", "death-message");
+    expect(editLog).toHaveBeenCalledWith({
+      content: deathLogContent(death, false),
+      components: []
+    });
+  });
+
   it("charges 1,000 XP once and revives the same marimo generation", async () => {
     const eventId = "00000000-0000-4000-8000-000000000099";
     const requestedAt = new Date("2026-08-12T03:00:00Z");
@@ -993,31 +1079,115 @@ describe("panel interaction wiring", () => {
     });
   });
 
-  it("does not consume moss-cola from a stale death log", async () => {
+  it("disables an old rescue button when the owner has a newer living generation", async () => {
     const spendRevivalItem = vi.fn();
+    const editLog = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
-    await dispatch(
-      botWith(
-        {
-          prepareRevival: vi.fn().mockResolvedValue({ status: "stale-death" })
-        },
-        { itemRevivalEnabled: true, spendRevivalItem }
-      ),
-      {
-        isButton: () => true,
-        customId: rescueConfirmationId(death, "900000000000000001"),
-        guildId: "1001",
-        channelId: "log-channel",
-        message: { id: "confirmation-message" },
-        user: { id: "helper-user", username: "helper", globalName: null },
-        member: { roles: [] },
-        memberPermissions: new PermissionsBitField([]),
-        update: vi.fn().mockResolvedValue(undefined),
-        editReply
-      }
+    const fetchMessage = vi.fn().mockResolvedValue({
+      content: deathLogContent(death),
+      edit: editLog
+    });
+    const bot = botWith(
+      { prepareRevival: vi.fn().mockResolvedValue({ status: "alive" }) },
+      { itemRevivalEnabled: true, spendRevivalItem }
     );
+    (bot as unknown as LogRefresher).fetchMessage = fetchMessage;
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: rescueConfirmationId(death, "900000000000000002"),
+      guildId: "1001",
+      channelId: "log-channel",
+      message: { id: "confirmation-message" },
+      user: { id: "helper-user", username: "helper", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      update: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
 
     expect(spendRevivalItem).not.toHaveBeenCalled();
+    expect(fetchMessage).toHaveBeenCalledWith(
+      "log-channel",
+      "900000000000000002"
+    );
+    expect(editLog).toHaveBeenCalledWith({
+      content: deathLogContent(death, false),
+      components: []
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content:
+        "持ち主には現在育成中のまりもがいるため、この死亡記録からは復活できません。苔コーラは消費していません。"
+    });
+  });
+
+  it("does not disable the main panel when its self-revival button finds a living marimo", async () => {
+    const spendRevivalItem = vi.fn();
+    const fetchMessage = vi.fn();
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith(
+      { prepareRevival: vi.fn().mockResolvedValue({ status: "alive" }) },
+      { itemRevivalEnabled: true, spendRevivalItem }
+    );
+    (bot as unknown as LogRefresher).fetchMessage = fetchMessage;
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: MOSS_COLA_REVIVE_CONFIRM_BUTTON_ID,
+      guildId: "1001",
+      channelId: "3001",
+      message: { id: "confirmation-message" },
+      user: { id: "2001", username: "owner", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      update: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
+
+    expect(spendRevivalItem).not.toHaveBeenCalled();
+    expect(fetchMessage).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledWith({
+      content:
+        "このまりもはすでに元気に生きています。苔コーラは消費していません。"
+    });
+  });
+
+  it("does not consume moss-cola from a stale death log", async () => {
+    const spendRevivalItem = vi.fn();
+    const editLog = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const fetchMessage = vi.fn().mockResolvedValue({
+      content: deathLogContent(death),
+      edit: editLog
+    });
+    const bot = botWith(
+      { prepareRevival: vi.fn().mockResolvedValue({ status: "stale-death" }) },
+      { itemRevivalEnabled: true, spendRevivalItem }
+    );
+    (bot as unknown as LogRefresher).fetchMessage = fetchMessage;
+
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: rescueConfirmationId(death, "900000000000000001"),
+      guildId: "1001",
+      channelId: "log-channel",
+      message: { id: "confirmation-message" },
+      user: { id: "helper-user", username: "helper", globalName: null },
+      member: { roles: [] },
+      memberPermissions: new PermissionsBitField([]),
+      update: vi.fn().mockResolvedValue(undefined),
+      editReply
+    });
+
+    expect(spendRevivalItem).not.toHaveBeenCalled();
+    expect(fetchMessage).toHaveBeenCalledWith(
+      "log-channel",
+      "900000000000000001"
+    );
+    expect(editLog).toHaveBeenCalledWith({
+      content: deathLogContent(death, false),
+      components: []
+    });
     expect(editReply).toHaveBeenCalledWith({
       content:
         "この死亡記録は古いため復活できません。苔コーラは消費していません。"
@@ -1470,13 +1640,15 @@ describe("panel interaction wiring", () => {
   });
 
   it("notifies live milestones but keeps midnight death logs silent", async () => {
-    const send = vi.fn().mockResolvedValue(undefined);
+    const send = vi.fn().mockResolvedValue({ id: "death-message" });
     const channel = textChannelWithSend(send);
+    const recordDeathLogMessage = vi.fn().mockResolvedValue(undefined);
     const bot = botWith({
       getConfig: vi.fn().mockResolvedValue({
         ...guildConfig,
         logChannelId: "3001"
-      })
+      }),
+      recordDeathLogMessage
     }) as unknown as LiveLogPoster;
     vi.spyOn(bot.client.channels, "fetch").mockResolvedValue(channel);
 
@@ -1487,6 +1659,7 @@ describe("panel interaction wiring", () => {
       ageDays: 4
     });
     await bot.postDeathLog(death);
+    await bot.postDeathLog(death, { showRescueButton: false });
 
     const milestone = send.mock.calls[0]?.[0] as {
       content: string;
@@ -1525,6 +1698,18 @@ describe("panel interaction wiring", () => {
     expect(memorial.nonce).toHaveLength(25);
     expect(memorial.nonce).not.toBe(milestone.nonce);
     expect(memorial.enforceNonce).toBe(true);
+    const inactiveMemorial = send.mock.calls[3]?.[0] as {
+      content: string;
+      components: unknown[];
+    };
+    expect(inactiveMemorial.content).not.toContain("苔コーラとは");
+    expect(inactiveMemorial.components).toEqual([]);
+    expect(recordDeathLogMessage).toHaveBeenCalledWith({
+      marimoId: death.id,
+      diedAt: death.diedAt,
+      channelId: "3001",
+      messageId: "death-message"
+    });
   });
 
   it("posts an opted-in missed-care reminder only in the configured log channel", async () => {

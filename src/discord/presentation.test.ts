@@ -19,6 +19,7 @@ import {
   mossColaRescueTarget,
   mossColaRevivalConfirmation,
   rankingPanel,
+  removeMossColaRescueHelp,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
   REMINDER_OFF_BUTTON_ID,
@@ -178,6 +179,12 @@ describe("Discord presentation", () => {
     expect(memorial).not.toContain("カフェガチャ");
     expect(deathLogContent(deadEntry("2001", 1, 10.6), false)).not.toContain(
       "苔コーラとは"
+    );
+    expect(removeMossColaRescueHelp(memorial)).toBe(
+      deathLogContent(deadEntry("2001", 1, 10.6), false)
+    );
+    expect(removeMossColaRescueHelp("以前の形式のログ")).toBe(
+      "以前の形式のログ"
     );
   });
 

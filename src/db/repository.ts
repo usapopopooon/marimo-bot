@@ -74,6 +74,16 @@ type DeadMarimoRow = MarimoRow & {
   final_size_mm: string | number;
 };
 
+type DeathLogMessageRow = QueryResultRow & {
+  death_log_channel_id: string | null;
+  death_log_message_id: string | null;
+};
+
+export type DeathLogMessageRef = {
+  channelId: string;
+  messageId: string;
+};
+
 type RevivalRow = DeadMarimoRow & {
   event_id: string;
   marimo_id: string;
@@ -408,7 +418,9 @@ export class MarimoRepository {
     await client.query(
       `UPDATE marimos
        SET died_at = $2, final_size_mm = $3,
-           death_reason = 'water-neglect', updated_at = NOW()
+           death_reason = 'water-neglect',
+           death_log_channel_id = NULL, death_log_message_id = NULL,
+           updated_at = NOW()
        WHERE id = $1`,
       [marimo.id, diedAt, finalSizeMm]
     );
@@ -1066,8 +1078,16 @@ export class MarimoRepository {
 
   public async revivableDeathKeys(guildId: string): Promise<Set<string>> {
     const result = await this.pool.query<DeadMarimoRow>(
-      `SELECT * FROM marimos
-       WHERE guild_id = $1 AND died_at IS NOT NULL`,
+      `SELECT DISTINCT ON (dead.user_id) dead.*
+       FROM marimos AS dead
+       WHERE dead.guild_id = $1 AND dead.died_at IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM marimos AS living
+           WHERE living.guild_id = dead.guild_id
+             AND living.user_id = dead.user_id
+             AND living.died_at IS NULL
+         )
+       ORDER BY dead.user_id, dead.generation DESC`,
       [guildId]
     );
     return new Set(
@@ -1076,6 +1096,47 @@ export class MarimoRepository {
         return `${death.id}:${death.diedAt.toISOString()}`;
       })
     );
+  }
+
+  public async recordDeathLogMessage(input: {
+    marimoId: string;
+    diedAt: Date;
+    channelId: string;
+    messageId: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimos
+       SET death_log_channel_id = $3, death_log_message_id = $4,
+           updated_at = NOW()
+       WHERE id = $1 AND died_at = $2`,
+      [input.marimoId, input.diedAt, input.channelId, input.messageId]
+    );
+  }
+
+  public async latestDeathLogMessage(
+    guildId: string,
+    userId: string
+  ): Promise<DeathLogMessageRef | null> {
+    const result = await this.pool.query<DeathLogMessageRow>(
+      `SELECT death_log_channel_id, death_log_message_id
+       FROM marimos
+       WHERE guild_id = $1 AND user_id = $2 AND died_at IS NOT NULL
+       ORDER BY generation DESC
+       LIMIT 1`,
+      [guildId, userId]
+    );
+    const row = result.rows[0];
+    if (
+      row?.death_log_channel_id === null ||
+      row?.death_log_channel_id === undefined ||
+      row.death_log_message_id === null
+    ) {
+      return null;
+    }
+    return {
+      channelId: row.death_log_channel_id,
+      messageId: row.death_log_message_id
+    };
   }
 
   public async markWateringLogDelivered(eventId: string): Promise<void> {

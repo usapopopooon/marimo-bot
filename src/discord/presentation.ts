@@ -323,6 +323,16 @@ export function deathLogContent(
   ].join("\n");
 }
 
+export function removeMossColaRescueHelp(content: string): string {
+  const rescueHelp = [
+    "🫧 **苔コーラとは？**",
+    "**カフェ・コレクション**で手に入るカードです。",
+    "2本以上持っていれば、最初の1本を残し、2本目以降の重複分を1本使ってこのまりもを助けられます。"
+  ].join("\n");
+  const suffix = `\n\n${rescueHelp}`;
+  return content.endsWith(suffix) ? content.slice(0, -suffix.length) : content;
+}
+
 export type MossColaRescueTarget = {
   ownerUserId: string;
   marimoId: string;

@@ -53,6 +53,7 @@ import {
   mossColaRescueConfirmTarget,
   mossColaRescueTarget,
   mossColaRevivalConfirmation,
+  removeMossColaRescueHelp,
   rankingPanel,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
@@ -479,8 +480,15 @@ export class MarimoBot {
     }
 
     const death = result.death;
+    if (result.watering.isBirth && result.watering.marimo.generation > 1) {
+      await this.runBestEffort("Disable previous-generation rescue", () =>
+        this.disablePreviousDeathRescue(guildId, interaction.user.id)
+      );
+    }
     if (death !== undefined) {
-      await this.runBestEffort("Death log", () => this.postDeathLog(death));
+      await this.runBestEffort("Death log", () =>
+        this.postDeathLog(death, { showRescueButton: false })
+      );
     }
     await this.runBestEffort("Watering log", () =>
       this.deliverWateringLog(result.watering)
@@ -672,13 +680,17 @@ export class MarimoBot {
       now
     });
     if (preparation.status === "alive") {
+      await this.disableObsoleteMossColaRescue(interaction, target);
       await interaction.editReply({
         content:
-          "このまりもはすでに元気に生きています。苔コーラは消費していません。"
+          target.marimoId === undefined
+            ? "このまりもはすでに元気に生きています。苔コーラは消費していません。"
+            : "持ち主には現在育成中のまりもがいるため、この死亡記録からは復活できません。苔コーラは消費していません。"
       });
       return;
     }
     if (preparation.status === "no-dead-marimo") {
+      await this.disableObsoleteMossColaRescue(interaction, target);
       await interaction.editReply({
         content:
           "生き返らせられるまりもがいません。苔コーラは消費していません。"
@@ -686,6 +698,7 @@ export class MarimoBot {
       return;
     }
     if (preparation.status === "stale-death") {
+      await this.disableObsoleteMossColaRescue(interaction, target);
       await interaction.editReply({
         content:
           "この死亡記録は古いため復活できません。苔コーラは消費していません。"
@@ -828,6 +841,44 @@ export class MarimoBot {
       ...mossColaRevivalConfirmation(confirmButtonId, isRescue),
       ephemeral: true,
       allowedMentions: { parse: [] }
+    });
+  }
+
+  private async disableObsoleteMossColaRescue(
+    interaction: ButtonInteraction,
+    target: MossColaRevivalTarget
+  ): Promise<void> {
+    if (target.marimoId === undefined) return;
+    await this.runBestEffort("Disable obsolete moss-cola rescue", async () => {
+      const sourceMessage = await this.fetchMessage(
+        interaction.channelId,
+        target.sourceMessageId
+      );
+      if (sourceMessage === null) return;
+      await sourceMessage.edit({
+        content: removeMossColaRescueHelp(sourceMessage.content),
+        components: []
+      });
+    });
+  }
+
+  private async disablePreviousDeathRescue(
+    guildId: string,
+    userId: string
+  ): Promise<void> {
+    const reference = await this.repository.latestDeathLogMessage(
+      guildId,
+      userId
+    );
+    if (reference === null) return;
+    const message = await this.fetchMessage(
+      reference.channelId,
+      reference.messageId
+    );
+    if (message === null) return;
+    await message.edit({
+      content: removeMossColaRescueHelp(message.content),
+      components: []
     });
   }
 
@@ -1515,14 +1566,18 @@ export class MarimoBot {
     }
   }
 
-  private async postDeathLog(death: DeadMarimo): Promise<void> {
+  private async postDeathLog(
+    death: DeadMarimo,
+    options: { showRescueButton?: boolean } = {}
+  ): Promise<void> {
     const config = await this.repository.getConfig(death.guildId);
     if (config.logChannelId === null) return;
     const channel = await this.client.channels.fetch(config.logChannelId);
     if (!(channel instanceof TextChannel)) return;
     await this.postDeathLogToChannel(channel, death, {
       notifyOwner: false,
-      deliveryKey: `death:${death.id}:${death.diedAt.toISOString()}`
+      deliveryKey: `death:${death.id}:${death.diedAt.toISOString()}`,
+      ...options
     });
   }
 
@@ -1546,7 +1601,7 @@ export class MarimoBot {
       options.deliveryKey === undefined
         ? undefined
         : logNonce(options.deliveryKey);
-    await channel.send({
+    const message = await channel.send({
       content: deathLogContent(death, options.showRescueButton !== false),
       components:
         options.showRescueButton === false ? [] : deathLogComponents(death),
@@ -1555,6 +1610,12 @@ export class MarimoBot {
         ? { parse: [], users: [death.userId] }
         : { parse: [] },
       ...(nonce === undefined ? {} : { nonce, enforceNonce: true })
+    });
+    await this.repository.recordDeathLogMessage({
+      marimoId: death.id,
+      diedAt: death.diedAt,
+      channelId: channel.id,
+      messageId: message.id
     });
   }
 

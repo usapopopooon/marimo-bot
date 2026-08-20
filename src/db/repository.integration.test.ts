@@ -707,4 +707,95 @@ suite("MarimoRepository integration", () => {
       new Set()
     );
   });
+
+  it("only advertises the latest death when no newer generation is alive", async () => {
+    const input = {
+      guildId: "1011",
+      userId: "2012",
+      channelId: "3011",
+      displayName: "世代交代する客",
+      baseXp: 100
+    };
+    await repository.water({
+      ...input,
+      now: new Date("2026-08-10T03:00:00Z")
+    });
+    const firstDeath = await repository.expireOne(
+      input.guildId,
+      input.userId,
+      new Date("2026-08-11T15:00:00Z")
+    );
+    if (firstDeath === null) throw new Error("expected first death");
+    expect(await repository.revivableDeathKeys(input.guildId)).toEqual(
+      new Set([`${firstDeath.id}:${firstDeath.diedAt.toISOString()}`])
+    );
+    expect(
+      await repository.latestDeathLogMessage(input.guildId, input.userId)
+    ).toBeNull();
+    await repository.recordDeathLogMessage({
+      marimoId: firstDeath.id,
+      diedAt: firstDeath.diedAt,
+      channelId: "death-log-channel",
+      messageId: "first-death-message"
+    });
+    expect(
+      await repository.latestDeathLogMessage(input.guildId, input.userId)
+    ).toEqual({
+      channelId: "death-log-channel",
+      messageId: "first-death-message"
+    });
+
+    const nextGeneration = await repository.water({
+      ...input,
+      now: new Date("2026-08-12T03:00:00Z")
+    });
+    expect(nextGeneration.status).toBe("watered");
+    expect(await repository.revivableDeathKeys(input.guildId)).toEqual(
+      new Set()
+    );
+    expect(
+      await repository.latestDeathLogMessage(input.guildId, input.userId)
+    ).toEqual({
+      channelId: "death-log-channel",
+      messageId: "first-death-message"
+    });
+    await expect(
+      repository.prepareRevival({
+        guildId: input.guildId,
+        ownerUserId: input.userId,
+        rescuerUserId: "helper",
+        channelId: input.channelId,
+        paymentMethod: "moss-cola",
+        expectedMarimoId: firstDeath.id,
+        expectedDiedAt: firstDeath.diedAt,
+        now: new Date("2026-08-12T03:01:00Z")
+      })
+    ).resolves.toEqual({ status: "alive" });
+
+    const secondDeath = await repository.expireOne(
+      input.guildId,
+      input.userId,
+      new Date("2026-08-13T15:00:00Z")
+    );
+    if (secondDeath === null) throw new Error("expected second death");
+    expect(secondDeath.generation).toBe(2);
+    expect(
+      await repository.latestDeathLogMessage(input.guildId, input.userId)
+    ).toBeNull();
+    await repository.recordDeathLogMessage({
+      marimoId: secondDeath.id,
+      diedAt: secondDeath.diedAt,
+      channelId: "death-log-channel",
+      messageId: "second-death-message"
+    });
+    expect(
+      await repository.latestDeathLogMessage(input.guildId, input.userId)
+    ).toEqual({
+      channelId: "death-log-channel",
+      messageId: "second-death-message"
+    });
+    expect(await repository.revivableDeathKeys(input.guildId)).toEqual(
+      new Set([`${secondDeath.id}:${secondDeath.diedAt.toISOString()}`])
+    );
+  });
 });
