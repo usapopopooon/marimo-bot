@@ -69,15 +69,6 @@ export type PendingRevivalLog = Revival & {
   deliveryAttempts: number;
 };
 
-export type PendingDeathLogRepair = {
-  eventId: string;
-  marimoId: string;
-  death: DeadMarimo;
-  channelId: string;
-  messageId: string;
-  repairAttempts: number;
-};
-
 export type RankingEntry = LivingMarimo & {
   sizeMm: number;
   ageDays: number;

@@ -149,11 +149,6 @@ type RevivalLogDeliverer = {
   postRevivalLog(revival: Revival): Promise<void>;
 };
 
-type DeathLogRepairer = {
-  repairPendingDeathLogs(): Promise<void>;
-  fetchMessage(channelId: string, messageId: string): Promise<Message | null>;
-};
-
 type LiveLogPoster = {
   client: Client;
   postWateringLog(watering: Watering): Promise<void>;
@@ -1850,37 +1845,7 @@ describe("panel interaction wiring", () => {
     expect(markRevivalLogDelivered).toHaveBeenCalledWith(revival.eventId);
   });
 
-  it("restores a death log edited by the previous revival release", async () => {
-    const repair = {
-      eventId: revival.eventId,
-      marimoId: death.id,
-      death,
-      channelId: "log-channel",
-      messageId: "death-message",
-      repairAttempts: 0
-    };
-    const markDeathLogRepaired = vi.fn().mockResolvedValue(undefined);
-    const markDeathLogRepairFailed = vi.fn().mockResolvedValue(undefined);
-    const bot = botWith({
-      pendingDeathLogRepairs: vi.fn().mockResolvedValue([repair]),
-      markDeathLogRepaired,
-      markDeathLogRepairFailed
-    }) as unknown as DeathLogRepairer;
-    const edit = vi.fn().mockResolvedValue(undefined);
-    bot.fetchMessage = vi.fn().mockResolvedValue({ edit });
-
-    await bot.repairPendingDeathLogs();
-
-    expect(edit).toHaveBeenCalledWith({
-      content: deathLogContent(death),
-      components: deathLogComponents(death),
-      allowedMentions: { parse: [] }
-    });
-    expect(markDeathLogRepaired).toHaveBeenCalledWith(death.id);
-    expect(markDeathLogRepairFailed).not.toHaveBeenCalled();
-  });
-
-  it("posts living revival images publicly without pinging either user", async () => {
+  it("does not notify the owner when another user revives their marimo", async () => {
     const send = vi.fn().mockResolvedValue({ id: "revival-message" });
     const channel = textChannelWithSend(send);
     const bot = botWith({
@@ -1907,6 +1872,28 @@ describe("panel interaction wiring", () => {
     expect(payload.allowedMentions).toEqual({ parse: [] });
     expect(payload.nonce).toHaveLength(25);
     expect(payload.enforceNonce).toBe(true);
+  });
+
+  it("keeps the owner mention enabled for a self-revival", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "revival-message" });
+    const channel = textChannelWithSend(send);
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue({
+        ...guildConfig,
+        logChannelId: "3001"
+      })
+    }) as unknown as LiveLogPoster;
+    vi.spyOn(bot.client.channels, "fetch").mockResolvedValue(channel);
+
+    await bot.postRevivalLog({ ...revival, rescuerUserId: revival.userId });
+
+    const payload = send.mock.calls[0]?.[0] as {
+      allowedMentions: { parse: string[]; users?: string[] };
+    };
+    expect(payload.allowedMentions).toEqual({
+      parse: [],
+      users: [revival.userId]
+    });
   });
 
   it("notifies live milestones but keeps midnight death logs silent", async () => {

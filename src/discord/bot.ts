@@ -282,9 +282,6 @@ export class MarimoBot {
       this.runInBackground("Scheduled revival log delivery", () =>
         this.deliverPendingRevivalLogs()
       );
-      this.runInBackground("Scheduled legacy death-log repair", () =>
-        this.repairPendingDeathLogs()
-      );
     }, 60_000);
   }
 
@@ -1630,7 +1627,7 @@ export class MarimoBot {
       throw new Error("Configured revival log channel is unavailable");
     }
     await this.postRevivalLogToChannel(channel, revival, {
-      notifyOwner: false,
+      notifyOwner: revival.rescuerUserId === revival.userId,
       deliveryKey: `revival:${revival.eventId}`
     });
   }
@@ -1648,7 +1645,9 @@ export class MarimoBot {
     await channel.send({
       content: revivalLogContent(revival),
       files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
-      allowedMentions: { parse: [] },
+      allowedMentions: options.notifyOwner
+        ? { parse: [], users: [revival.userId] }
+        : { parse: [] },
       ...(nonce === undefined ? {} : { nonce, enforceNonce: true })
     });
   }
@@ -1674,36 +1673,6 @@ export class MarimoBot {
       await this.runBestEffort("Revival log retry", () =>
         this.deliverRevivalLog(revival)
       );
-    }
-  }
-
-  private async repairPendingDeathLogs(): Promise<void> {
-    const repairs = await this.repository.pendingDeathLogRepairs();
-    for (const repair of repairs) {
-      await this.runBestEffort("Legacy death-log repair", async () => {
-        try {
-          const message = await this.fetchMessage(
-            repair.channelId,
-            repair.messageId
-          );
-          if (message === null) {
-            throw new Error("Edited death log is unavailable");
-          }
-          await message.edit({
-            content: deathLogContent(repair.death),
-            components: deathLogComponents(repair.death),
-            allowedMentions: { parse: [] }
-          });
-          await this.repository.markDeathLogRepaired(repair.marimoId);
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          await this.repository.markDeathLogRepairFailed(
-            repair.eventId,
-            detail
-          );
-          throw error;
-        }
-      });
     }
   }
 
@@ -1837,7 +1806,6 @@ export class MarimoBot {
     await this.refreshRankingPanels();
     await this.deliverPendingWateringLogs();
     await this.deliverPendingRevivalLogs();
-    await this.repairPendingDeathLogs();
     await this.xpDelivery.deliverPending();
   }
 
