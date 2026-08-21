@@ -17,6 +17,7 @@ import type {
   GuildConfig,
   LivingMarimo,
   PanelKind,
+  PendingDeathLogRepair,
   PendingRevivalLog,
   PendingWateringLog,
   PersonalMarimoStatus,
@@ -96,6 +97,12 @@ type RevivalRow = DeadMarimoRow & {
   requested_at: Date;
   revived_at: Date | null;
   log_delivery_attempts: number;
+};
+
+type DeathLogRepairRow = RevivalRow & {
+  death_log_channel_id: string;
+  death_log_message_id: string;
+  death_log_repair_attempts: number;
 };
 
 type WateringReminderRow = QueryResultRow & {
@@ -1094,6 +1101,37 @@ export class MarimoRepository {
     return result.rows.map(revivalFromRow);
   }
 
+  public async pendingDeathLogRepairs(
+    limit = 25
+  ): Promise<PendingDeathLogRepair[]> {
+    const result = await this.pool.query<DeathLogRepairRow>(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (revival.marimo_id)
+                revival.*, revival.marimo_id AS id,
+                marimo.death_log_channel_id,
+                marimo.death_log_message_id
+         FROM marimo_revivals AS revival
+         JOIN marimos AS marimo ON marimo.id = revival.marimo_id
+         WHERE revival.death_log_repair_status = 'pending'
+           AND marimo.died_at IS NULL
+           AND marimo.death_log_channel_id IS NOT NULL
+           AND marimo.death_log_message_id IS NOT NULL
+         ORDER BY revival.marimo_id, revival.revived_at DESC
+       ) AS repair
+       ORDER BY death_log_repair_attempts ASC, revived_at ASC
+       LIMIT $1`,
+      [limit]
+    );
+    return result.rows.map((row) => ({
+      eventId: row.event_id,
+      marimoId: row.marimo_id,
+      death: deadFromRow(row),
+      channelId: row.death_log_channel_id,
+      messageId: row.death_log_message_id,
+      repairAttempts: row.death_log_repair_attempts
+    }));
+  }
+
   public async deathLogHistory(
     guildId: string,
     through: Date
@@ -1218,6 +1256,33 @@ export class MarimoRepository {
        SET log_delivery_attempts = log_delivery_attempts + 1,
            log_last_error = LEFT($2, 1000), updated_at = NOW()
        WHERE event_id = $1`,
+      [eventId, error]
+    );
+  }
+
+  public async markDeathLogRepaired(marimoId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_revivals
+       SET death_log_repair_status = 'repaired',
+           death_log_repair_attempts = death_log_repair_attempts + 1,
+           death_log_repaired_at = NOW(),
+           death_log_repair_last_error = NULL,
+           updated_at = NOW()
+       WHERE marimo_id = $1 AND death_log_repair_status = 'pending'`,
+      [marimoId]
+    );
+  }
+
+  public async markDeathLogRepairFailed(
+    eventId: string,
+    error: string
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_revivals
+       SET death_log_repair_attempts = death_log_repair_attempts + 1,
+           death_log_repair_last_error = LEFT($2, 1000),
+           updated_at = NOW()
+       WHERE event_id = $1 AND death_log_repair_status = 'pending'`,
       [eventId, error]
     );
   }

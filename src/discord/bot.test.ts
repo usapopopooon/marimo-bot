@@ -149,6 +149,11 @@ type RevivalLogDeliverer = {
   postRevivalLog(revival: Revival): Promise<void>;
 };
 
+type DeathLogRepairer = {
+  repairPendingDeathLogs(): Promise<void>;
+  fetchMessage(channelId: string, messageId: string): Promise<Message | null>;
+};
+
 type LiveLogPoster = {
   client: Client;
   postWateringLog(watering: Watering): Promise<void>;
@@ -896,15 +901,11 @@ describe("panel interaction wiring", () => {
   });
 
   it.each([
-    ["the owner", "2001", "<@2001> が **まりも** を"],
-    [
-      "another user",
-      "helper-user",
-      "<@helper-user> が <@2001> の **まりも** を"
-    ]
+    ["the owner", "2001"],
+    ["another user", "helper-user"]
   ])(
     "lets %s use the same death-log button and pay 1,000 XP",
-    async (_case, rescuerUserId, expectedLogText) => {
+    async (_case, rescuerUserId) => {
       const eventId = `00000000-0000-4000-8000-${rescuerUserId === "2001" ? "000000000299" : "000000000399"}`;
       const requestedAt = new Date("2026-08-12T03:00:00Z");
       const prepareRevival = vi.fn().mockResolvedValue({
@@ -941,7 +942,8 @@ describe("panel interaction wiring", () => {
       const deliverRevivalLog = vi.fn().mockResolvedValue(undefined);
       harness.deliverRevivalLog = deliverRevivalLog;
       const editLog = vi.fn().mockResolvedValue(undefined);
-      harness.fetchMessage = vi.fn().mockResolvedValue({ edit: editLog });
+      const fetchMessage = vi.fn().mockResolvedValue({ edit: editLog });
+      harness.fetchMessage = fetchMessage;
       const editReply = vi.fn().mockResolvedValue(undefined);
 
       await dispatch(bot, {
@@ -984,11 +986,8 @@ describe("panel interaction wiring", () => {
         now: expect.any(Date)
       });
       expect(deliverRevivalLog).toHaveBeenCalledWith(completedRevival);
-      expect(editLog).toHaveBeenCalledWith({
-        content: expect.stringContaining(expectedLogText),
-        components: [],
-        allowedMentions: { parse: [] }
-      });
+      expect(fetchMessage).not.toHaveBeenCalled();
+      expect(editLog).not.toHaveBeenCalled();
       expect(editReply).toHaveBeenCalledWith({
         content: expect.stringContaining("**-1,000 XP**")
       });
@@ -1003,9 +1002,11 @@ describe("panel interaction wiring", () => {
       { prepareRevival: vi.fn().mockResolvedValue({ status: "alive" }) },
       { revivalEnabled: true, spendRevival }
     );
-    (bot as unknown as WaterInteractionHarness).fetchMessage = vi
-      .fn()
-      .mockResolvedValue({ content: deathLogContent(death), edit: editLog });
+    const fetchMessage = vi.fn().mockResolvedValue({
+      content: deathLogContent(death),
+      edit: editLog
+    });
+    (bot as unknown as WaterInteractionHarness).fetchMessage = fetchMessage;
 
     await dispatch(bot, {
       isButton: () => true,
@@ -1021,10 +1022,8 @@ describe("panel interaction wiring", () => {
     });
 
     expect(spendRevival).not.toHaveBeenCalled();
-    expect(editLog).toHaveBeenCalledWith({
-      content: deathLogContent(death, false),
-      components: []
-    });
+    expect(fetchMessage).not.toHaveBeenCalled();
+    expect(editLog).not.toHaveBeenCalled();
     expect(editReply).toHaveBeenCalledWith({
       content:
         "持ち主には現在育成中のまりもがいるため、この死亡記録からは復活できません。XPは消費していません。"
@@ -1233,18 +1232,8 @@ describe("panel interaction wiring", () => {
       now: expect.any(Date)
     });
     expect(deliverRevivalLog).toHaveBeenCalledWith(completedRevival);
-    expect(fetchMessage).toHaveBeenCalledWith(
-      "log-channel",
-      "900000000000000000"
-    );
-    expect(editLog).toHaveBeenCalledWith({
-      content: expect.stringContaining("<@helper-user> が <@2001>"),
-      components: [],
-      allowedMentions: { parse: [] }
-    });
-    const editedLog = editLog.mock.calls[0]?.[0] as
-      { content: string } | undefined;
-    expect(editedLog?.content).not.toContain("苔コーラとは");
+    expect(fetchMessage).not.toHaveBeenCalled();
+    expect(editLog).not.toHaveBeenCalled();
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining("苔コーラを1本使いました")
     });
@@ -1254,7 +1243,7 @@ describe("panel interaction wiring", () => {
     });
   });
 
-  it("disables an old rescue button when the owner has a newer living generation", async () => {
+  it("leaves an old death log untouched when the owner has a newer living generation", async () => {
     const spendRevivalItem = vi.fn();
     const editLog = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
@@ -1282,14 +1271,8 @@ describe("panel interaction wiring", () => {
     });
 
     expect(spendRevivalItem).not.toHaveBeenCalled();
-    expect(fetchMessage).toHaveBeenCalledWith(
-      "log-channel",
-      "900000000000000002"
-    );
-    expect(editLog).toHaveBeenCalledWith({
-      content: deathLogContent(death, false),
-      components: []
-    });
+    expect(fetchMessage).not.toHaveBeenCalled();
+    expect(editLog).not.toHaveBeenCalled();
     expect(editReply).toHaveBeenCalledWith({
       content:
         "持ち主には現在育成中のまりもがいるため、この死亡記録からは復活できません。苔コーラは消費していません。"
@@ -1355,14 +1338,8 @@ describe("panel interaction wiring", () => {
     });
 
     expect(spendRevivalItem).not.toHaveBeenCalled();
-    expect(fetchMessage).toHaveBeenCalledWith(
-      "log-channel",
-      "900000000000000001"
-    );
-    expect(editLog).toHaveBeenCalledWith({
-      content: deathLogContent(death, false),
-      components: []
-    });
+    expect(fetchMessage).not.toHaveBeenCalled();
+    expect(editLog).not.toHaveBeenCalled();
     expect(editReply).toHaveBeenCalledWith({
       content:
         "この死亡記録は古いため復活できません。苔コーラは消費していません。"
@@ -1871,6 +1848,36 @@ describe("panel interaction wiring", () => {
       "unknown Discord result"
     );
     expect(markRevivalLogDelivered).toHaveBeenCalledWith(revival.eventId);
+  });
+
+  it("restores a death log edited by the previous revival release", async () => {
+    const repair = {
+      eventId: revival.eventId,
+      marimoId: death.id,
+      death,
+      channelId: "log-channel",
+      messageId: "death-message",
+      repairAttempts: 0
+    };
+    const markDeathLogRepaired = vi.fn().mockResolvedValue(undefined);
+    const markDeathLogRepairFailed = vi.fn().mockResolvedValue(undefined);
+    const bot = botWith({
+      pendingDeathLogRepairs: vi.fn().mockResolvedValue([repair]),
+      markDeathLogRepaired,
+      markDeathLogRepairFailed
+    }) as unknown as DeathLogRepairer;
+    const edit = vi.fn().mockResolvedValue(undefined);
+    bot.fetchMessage = vi.fn().mockResolvedValue({ edit });
+
+    await bot.repairPendingDeathLogs();
+
+    expect(edit).toHaveBeenCalledWith({
+      content: deathLogContent(death),
+      components: deathLogComponents(death),
+      allowedMentions: { parse: [] }
+    });
+    expect(markDeathLogRepaired).toHaveBeenCalledWith(death.id);
+    expect(markDeathLogRepairFailed).not.toHaveBeenCalled();
   });
 
   it("posts living revival images publicly without pinging either user", async () => {

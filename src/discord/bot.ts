@@ -282,6 +282,9 @@ export class MarimoBot {
       this.runInBackground("Scheduled revival log delivery", () =>
         this.deliverPendingRevivalLogs()
       );
+      this.runInBackground("Scheduled legacy death-log repair", () =>
+        this.repairPendingDeathLogs()
+      );
     }, 60_000);
   }
 
@@ -566,7 +569,6 @@ export class MarimoBot {
       now
     });
     if (preparation.status === "alive") {
-      await this.disableObsoleteDeathLogRescue(interaction, target);
       await interaction.editReply({
         content:
           target.marimoId === undefined
@@ -576,7 +578,6 @@ export class MarimoBot {
       return;
     }
     if (preparation.status === "no-dead-marimo") {
-      await this.disableObsoleteDeathLogRescue(interaction, target);
       await interaction.editReply({
         content:
           target.marimoId === undefined
@@ -595,7 +596,6 @@ export class MarimoBot {
       return;
     }
     if (preparation.status === "stale-death") {
-      await this.disableObsoleteDeathLogRescue(interaction, target);
       await interaction.editReply({
         content:
           target.marimoId === undefined
@@ -672,28 +672,6 @@ export class MarimoBot {
     await this.runBestEffort("Ranking update after revival", () =>
       this.updateRankings(guildId, new Date())
     );
-    if (target.marimoId !== undefined) {
-      await this.runBestEffort("Disable completed XP rescue", async () => {
-        const sourceMessage = await this.fetchMessage(
-          interaction.channelId,
-          target.sourceMessageId
-        );
-        if (sourceMessage === null) return;
-        const rescueLine =
-          rescuerUserId === target.ownerUserId
-            ? `🌿 <@${rescuerUserId}> が **${displayMarimoName(revival.name)}** を **${revival.costXp.toLocaleString("ja-JP")} XP**で生き返らせました。`
-            : `🌿 <@${rescuerUserId}> が <@${target.ownerUserId}> の **${displayMarimoName(revival.name)}** を **${revival.costXp.toLocaleString("ja-JP")} XP**で生き返らせました。`;
-        await sourceMessage.edit({
-          content: [
-            deathLogContent(preparation.death, false),
-            "",
-            rescueLine
-          ].join("\n"),
-          components: [],
-          allowedMentions: { parse: [] }
-        });
-      });
-    }
     await this.runBestEffort("Revival log", () =>
       this.deliverRevivalLog(revival)
     );
@@ -747,7 +725,6 @@ export class MarimoBot {
       now
     });
     if (preparation.status === "alive") {
-      await this.disableObsoleteDeathLogRescue(interaction, target);
       await interaction.editReply({
         content:
           target.marimoId === undefined
@@ -757,7 +734,6 @@ export class MarimoBot {
       return;
     }
     if (preparation.status === "no-dead-marimo") {
-      await this.disableObsoleteDeathLogRescue(interaction, target);
       await interaction.editReply({
         content:
           "生き返らせられるまりもがいません。苔コーラは消費していません。"
@@ -765,7 +741,6 @@ export class MarimoBot {
       return;
     }
     if (preparation.status === "stale-death") {
-      await this.disableObsoleteDeathLogRescue(interaction, target);
       await interaction.editReply({
         content:
           "この死亡記録は古いため復活できません。苔コーラは消費していません。"
@@ -849,27 +824,6 @@ export class MarimoBot {
     await this.runBestEffort("Ranking update after moss-cola revival", () =>
       this.updateRankings(guildId, new Date())
     );
-    if (target.marimoId !== undefined) {
-      await this.runBestEffort(
-        "Disable completed moss-cola rescue",
-        async () => {
-          const sourceMessage = await this.fetchMessage(
-            interaction.channelId,
-            target.sourceMessageId
-          );
-          if (sourceMessage === null) return;
-          await sourceMessage.edit({
-            content: [
-              deathLogContent(preparation.death, false),
-              "",
-              `🫧 <@${rescuerUserId}> が <@${target.ownerUserId}> の **${displayMarimoName(revival.name)}** に苔コーラを与え、生き返らせました。`
-            ].join("\n"),
-            components: [],
-            allowedMentions: { parse: [] }
-          });
-        }
-      );
-    }
     await this.runBestEffort("Moss-cola revival log", () =>
       this.deliverRevivalLog(revival)
     );
@@ -911,24 +865,6 @@ export class MarimoBot {
       ...mossColaRevivalConfirmation(confirmButtonId, isRescue),
       ephemeral: true,
       allowedMentions: { parse: [] }
-    });
-  }
-
-  private async disableObsoleteDeathLogRescue(
-    interaction: ButtonInteraction,
-    target: RevivalTarget
-  ): Promise<void> {
-    if (target.marimoId === undefined) return;
-    await this.runBestEffort("Disable obsolete death-log rescue", async () => {
-      const sourceMessage = await this.fetchMessage(
-        interaction.channelId,
-        target.sourceMessageId
-      );
-      if (sourceMessage === null) return;
-      await sourceMessage.edit({
-        content: removeDeathLogRescueHelp(sourceMessage.content),
-        components: []
-      });
     });
   }
 
@@ -1741,6 +1677,36 @@ export class MarimoBot {
     }
   }
 
+  private async repairPendingDeathLogs(): Promise<void> {
+    const repairs = await this.repository.pendingDeathLogRepairs();
+    for (const repair of repairs) {
+      await this.runBestEffort("Legacy death-log repair", async () => {
+        try {
+          const message = await this.fetchMessage(
+            repair.channelId,
+            repair.messageId
+          );
+          if (message === null) {
+            throw new Error("Edited death log is unavailable");
+          }
+          await message.edit({
+            content: deathLogContent(repair.death),
+            components: deathLogComponents(repair.death),
+            allowedMentions: { parse: [] }
+          });
+          await this.repository.markDeathLogRepaired(repair.marimoId);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          await this.repository.markDeathLogRepairFailed(
+            repair.eventId,
+            detail
+          );
+          throw error;
+        }
+      });
+    }
+  }
+
   private async postDeathLog(
     death: DeadMarimo,
     options: { showRescueButton?: boolean } = {}
@@ -1871,6 +1837,7 @@ export class MarimoBot {
     await this.refreshRankingPanels();
     await this.deliverPendingWateringLogs();
     await this.deliverPendingRevivalLogs();
+    await this.repairPendingDeathLogs();
     await this.xpDelivery.deliverPending();
   }
 

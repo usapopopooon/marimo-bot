@@ -505,8 +505,15 @@ suite("MarimoRepository integration", () => {
       input.userId,
       new Date("2026-08-11T15:00:00Z")
     );
-    expect(death?.finalSizeMm).toBe(10.6);
+    if (death === null) throw new Error("expected death");
+    expect(death.finalSizeMm).toBe(10.6);
     expect(await repository.deadRankings(input.guildId)).toEqual([death]);
+    await repository.recordDeathLogMessage({
+      marimoId: death.id,
+      diedAt: death.diedAt,
+      channelId: "death-log-channel",
+      messageId: "edited-death-message"
+    });
 
     const first = await repository.prepareRevival({
       guildId: input.guildId,
@@ -572,6 +579,34 @@ suite("MarimoRepository integration", () => {
         (event) => event.eventId === first.eventId
       )?.deliveryAttempts
     ).toBe(1);
+    await pool.query(
+      `UPDATE marimo_revivals
+       SET death_log_repair_status = 'pending'
+       WHERE event_id = $1`,
+      [first.eventId]
+    );
+    const pendingRepair = (await repository.pendingDeathLogRepairs()).find(
+      (repair) => repair.eventId === first.eventId
+    );
+    expect(pendingRepair).toMatchObject({
+      marimoId: death.id,
+      death,
+      channelId: "death-log-channel",
+      messageId: "edited-death-message",
+      repairAttempts: 0
+    });
+    await repository.markDeathLogRepairFailed(first.eventId, "edit failed");
+    expect(
+      (await repository.pendingDeathLogRepairs()).find(
+        (repair) => repair.eventId === first.eventId
+      )?.repairAttempts
+    ).toBe(1);
+    await repository.markDeathLogRepaired(death.id);
+    expect(
+      (await repository.pendingDeathLogRepairs()).some(
+        (repair) => repair.eventId === first.eventId
+      )
+    ).toBe(false);
 
     const revivalHistory = await repository.revivalLogHistory(
       input.guildId,

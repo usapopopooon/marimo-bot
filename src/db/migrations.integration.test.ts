@@ -685,6 +685,39 @@ suite("database migration upgrade", () => {
           log_delivery_status: "pending"
         }
       ]);
+      await pool.query(
+        `UPDATE marimo_revivals
+         SET log_delivery_attempts = 1
+         WHERE event_id = '00000000-0000-4000-8000-000000000391'`
+      );
+      await pool.query(
+        await readFile(
+          resolve(
+            process.cwd(),
+            "migrations",
+            "016_repair_edited_death_logs.sql"
+          ),
+          "utf8"
+        )
+      );
+      const repairs = await pool.query<{
+        event_id: string;
+        death_log_repair_status: string;
+      }>(
+        `SELECT event_id, death_log_repair_status
+         FROM marimo_revivals
+         ORDER BY event_id`
+      );
+      expect(repairs.rows).toEqual([
+        {
+          event_id: "00000000-0000-4000-8000-000000000391",
+          death_log_repair_status: "pending"
+        },
+        {
+          event_id: "00000000-0000-4000-8000-000000000392",
+          death_log_repair_status: "not-needed"
+        }
+      ]);
       const column = await pool.query<{ column_default: string | null }>(
         `SELECT column_default
          FROM information_schema.columns
