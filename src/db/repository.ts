@@ -17,6 +17,7 @@ import type {
   GuildConfig,
   LivingMarimo,
   PanelKind,
+  PendingRevivalLog,
   PendingWateringLog,
   PersonalMarimoStatus,
   RankingEntry,
@@ -94,6 +95,7 @@ type RevivalRow = DeadMarimoRow & {
   status: "pending" | "completed";
   requested_at: Date;
   revived_at: Date | null;
+  log_delivery_attempts: number;
 };
 
 type WateringReminderRow = QueryResultRow & {
@@ -172,6 +174,36 @@ function deadFromRow(row: DeadMarimoRow): DeadMarimo {
     ...livingFromRow(row),
     diedAt: new Date(row.died_at),
     finalSizeMm: Number(row.final_size_mm)
+  };
+}
+
+function revivalFromRow(row: RevivalRow): Revival {
+  if (row.revived_at === null) {
+    throw new Error("completed revival has no revival time");
+  }
+  const revivedAt = new Date(row.revived_at);
+  const bornAt = revivedBornAt(
+    new Date(row.born_at),
+    new Date(row.died_at),
+    revivedAt
+  );
+  return {
+    id: row.marimo_id,
+    guildId: row.guild_id,
+    userId: row.user_id,
+    generation: row.generation,
+    ownerDisplayName: row.owner_display_name,
+    name: row.name,
+    bornAt,
+    lastWateredAt: revivedAt,
+    lastWateredDate: jstDate(revivedAt),
+    sizeMm: sizeAt(bornAt, revivedAt),
+    ageDays: ageDays(bornAt, revivedAt),
+    eventId: row.event_id,
+    costXp: row.cost_xp,
+    paymentMethod: row.payment_method,
+    rescuerUserId: row.rescuer_user_id,
+    revivedAt
   };
 }
 
@@ -708,19 +740,9 @@ export class MarimoRepository {
       ) {
         throw new Error("revival cost does not match its payment method");
       }
-      let marimo: LivingMarimo;
       const costXp =
         revival.status === "completed" ? revival.cost_xp : input.costXp;
-      if (revival.status === "completed") {
-        const current = await this.findLiving(
-          client,
-          input.guildId,
-          input.ownerUserId
-        );
-        if (current === null)
-          throw new Error("completed revival has no living marimo");
-        marimo = current;
-      } else {
+      if (revival.status !== "completed") {
         const resumedBornAt = revivedBornAt(
           new Date(revival.born_at),
           new Date(revival.died_at),
@@ -750,7 +772,7 @@ export class MarimoRepository {
             resumedBornAt
           ]
         );
-        marimo = livingFromRow(firstRow(updated.rows, "marimo revival"));
+        firstRow(updated.rows, "marimo revival");
         await client.query(
           `UPDATE marimo_revivals
            SET status = 'completed', revived_at = $2, cost_xp = $3,
@@ -759,15 +781,13 @@ export class MarimoRepository {
           [input.eventId, input.now, costXp]
         );
       }
-      return {
-        ...marimo,
-        eventId: input.eventId,
-        costXp,
-        paymentMethod: revival.payment_method,
-        rescuerUserId: revival.rescuer_user_id,
-        sizeMm: sizeAt(marimo.bornAt, input.now),
-        ageDays: ageDays(marimo.bornAt, input.now)
-      };
+      return revivalFromRow({
+        ...revival,
+        status: "completed",
+        cost_xp: costXp,
+        revived_at:
+          revival.status === "completed" ? revival.revived_at : input.now
+      });
     });
   }
 
@@ -1027,6 +1047,20 @@ export class MarimoRepository {
     }));
   }
 
+  public async pendingRevivalLogs(limit = 25): Promise<PendingRevivalLog[]> {
+    const result = await this.pool.query<RevivalRow>(
+      `SELECT *, marimo_id AS id FROM marimo_revivals
+       WHERE status = 'completed' AND log_delivery_status = 'pending'
+       ORDER BY log_delivery_attempts ASC, created_at ASC
+       LIMIT $1`,
+      [limit]
+    );
+    return result.rows.map((row) => ({
+      ...revivalFromRow(row),
+      deliveryAttempts: row.log_delivery_attempts
+    }));
+  }
+
   public async wateringLogHistory(
     guildId: string,
     through: Date
@@ -1045,6 +1079,19 @@ export class MarimoRepository {
       [guildId, through]
     );
     return result.rows.map(wateringFromRow);
+  }
+
+  public async revivalLogHistory(
+    guildId: string,
+    through: Date
+  ): Promise<Revival[]> {
+    const result = await this.pool.query<RevivalRow>(
+      `SELECT *, marimo_id AS id FROM marimo_revivals
+       WHERE guild_id = $1 AND status = 'completed' AND revived_at <= $2
+       ORDER BY revived_at ASC, created_at ASC, event_id ASC`,
+      [guildId, through]
+    );
+    return result.rows.map(revivalFromRow);
   }
 
   public async deathLogHistory(
@@ -1150,6 +1197,31 @@ export class MarimoRepository {
     );
   }
 
+  public async markRevivalLogDelivered(eventId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_revivals
+       SET log_delivery_status = 'delivered',
+           log_delivery_attempts = log_delivery_attempts + 1,
+           log_delivered_at = NOW(), log_last_error = NULL,
+           updated_at = NOW()
+       WHERE event_id = $1`,
+      [eventId]
+    );
+  }
+
+  public async markRevivalLogFailed(
+    eventId: string,
+    error: string
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_revivals
+       SET log_delivery_attempts = log_delivery_attempts + 1,
+           log_last_error = LEFT($2, 1000), updated_at = NOW()
+       WHERE event_id = $1`,
+      [eventId, error]
+    );
+  }
+
   public async markWateringLogFailed(
     eventId: string,
     error: string
@@ -1173,6 +1245,22 @@ export class MarimoRepository {
            log_delivery_attempts = log_delivery_attempts + 1,
            log_delivered_at = NOW(), log_last_error = NULL
        WHERE guild_id = $1 AND watered_at <= $2
+         AND log_delivery_status = 'pending'`,
+      [guildId, through]
+    );
+  }
+
+  public async markGuildRevivalLogsDeliveredThrough(
+    guildId: string,
+    through: Date
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE marimo_revivals
+       SET log_delivery_status = 'delivered',
+           log_delivery_attempts = log_delivery_attempts + 1,
+           log_delivered_at = NOW(), log_last_error = NULL,
+           updated_at = NOW()
+       WHERE guild_id = $1 AND status = 'completed' AND revived_at <= $2
          AND log_delivery_status = 'pending'`,
       [guildId, through]
     );

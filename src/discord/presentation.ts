@@ -25,6 +25,7 @@ import {
   type DeadMarimo,
   type DueWateringReminder,
   type RankingEntry,
+  type Revival,
   type Watering,
   type WateringReminderHour
 } from "../domain/types.js";
@@ -303,6 +304,19 @@ export function wateringLogContent(watering: Watering): string {
     ...(dialogue === null
       ? []
       : ["", `> 🟢 ${displayMarimoName(watering.marimo.name)}「${dialogue}」`])
+  ].join("\n");
+}
+
+export function revivalLogContent(revival: Revival): string {
+  const payment =
+    revival.paymentMethod === "xp"
+      ? `**${revival.costXp.toLocaleString("ja-JP")} XP**`
+      : "**苔コーラ 1本**";
+  const emoji = revival.paymentMethod === "xp" ? "🌿" : "🫧";
+  return [
+    `🟢 ${ownerMention(revival.userId)} の **${displayMarimoName(revival.name)}** が生き返りました`,
+    `${emoji} 助けた人: ${ownerMention(revival.rescuerUserId)}｜${payment}`,
+    `第${revival.generation}世代｜飼育 **${revival.ageDays}日**｜**${revival.sizeMm.toFixed(2)} mm**`
   ].join("\n");
 }
 

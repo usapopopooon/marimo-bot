@@ -555,7 +555,34 @@ suite("MarimoRepository integration", () => {
     expect(revived.ageDays).toBe(3);
     expect(revived.sizeMm).toBe(10.6);
     expect(revived.costXp).toBe(1000);
+    expect(revived.revivedAt).toEqual(new Date("2026-08-14T03:00:00Z"));
     expect(await repository.deadRankings(input.guildId)).toEqual([]);
+
+    const pendingRevival = (await repository.pendingRevivalLogs()).find(
+      (event) => event.eventId === first.eventId
+    );
+    expect(pendingRevival).toMatchObject({
+      rescuerUserId: input.userId,
+      paymentMethod: "xp",
+      deliveryAttempts: 0
+    });
+    await repository.markRevivalLogFailed(first.eventId, "send failed");
+    expect(
+      (await repository.pendingRevivalLogs()).find(
+        (event) => event.eventId === first.eventId
+      )?.deliveryAttempts
+    ).toBe(1);
+
+    const revivalHistory = await repository.revivalLogHistory(
+      input.guildId,
+      new Date("2026-08-15T00:00:00Z")
+    );
+    expect(revivalHistory).toHaveLength(1);
+    expect(revivalHistory[0]).toMatchObject({
+      eventId: first.eventId,
+      rescuerUserId: input.userId,
+      paymentMethod: "xp"
+    });
 
     const completedAgain = await repository.completeRevival({
       eventId: first.eventId,
@@ -564,10 +591,18 @@ suite("MarimoRepository integration", () => {
       rescuerUserId: input.userId,
       paymentMethod: "xp",
       costXp: 1000,
-      now: new Date("2026-08-14T03:00:00Z")
+      now: new Date("2026-08-15T03:00:00Z")
     });
     expect(completedAgain.id).toBe(revived.id);
     expect(completedAgain.sizeMm).toBe(10.6);
+    expect(completedAgain.ageDays).toBe(3);
+    expect(completedAgain.revivedAt).toEqual(revived.revivedAt);
+    await repository.markRevivalLogDelivered(first.eventId);
+    expect(
+      (await repository.pendingRevivalLogs()).some(
+        (event) => event.eventId === first.eventId
+      )
+    ).toBe(false);
 
     const sameDayWatering = await repository.water({
       ...input,

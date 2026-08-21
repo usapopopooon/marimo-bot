@@ -59,6 +59,7 @@ import {
   REMINDER_HOUR_BUTTON_PREFIX,
   REMINDER_OFF_BUTTON_ID,
   REVIVE_BUTTON_ID,
+  revivalLogContent,
   STATUS_BUTTON_ID,
   statusContent,
   WATER_BUTTON_ID,
@@ -229,6 +230,7 @@ function errorDetails(error: unknown): Record<string, unknown> {
 
 export class MarimoBot {
   private readonly client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  private readonly revivalLogsInFlight = new Set<string>();
   private readonly wateringLogsInFlight = new Set<string>();
   private sweepTimer: NodeJS.Timeout | undefined;
   private xpTimer: NodeJS.Timeout | undefined;
@@ -276,6 +278,9 @@ export class MarimoBot {
       );
       this.runInBackground("Scheduled watering log delivery", () =>
         this.deliverPendingWateringLogs()
+      );
+      this.runInBackground("Scheduled revival log delivery", () =>
+        this.deliverPendingRevivalLogs()
       );
     }, 60_000);
   }
@@ -689,6 +694,9 @@ export class MarimoBot {
         });
       });
     }
+    await this.runBestEffort("Revival log", () =>
+      this.deliverRevivalLog(revival)
+    );
     await interaction.editReply({
       content: [
         `🌿 **${displayMarimoName(revival.name)}** が生き返りました。`,
@@ -862,6 +870,9 @@ export class MarimoBot {
         }
       );
     }
+    await this.runBestEffort("Moss-cola revival log", () =>
+      this.deliverRevivalLog(revival)
+    );
     await interaction.editReply({
       content: [
         `🫧 **${displayMarimoName(revival.name)}** が生き返りました。`,
@@ -1327,11 +1338,14 @@ export class MarimoBot {
     }
 
     const oldLogs = await this.findMarimoLogs(channel, botUserId);
-    const [waterings, deaths, revivableDeathKeys] = await Promise.all([
-      this.repository.wateringLogHistory(interaction.guildId, startedAt),
-      this.repository.deathLogHistory(interaction.guildId, startedAt),
-      this.repository.revivableDeathKeys(interaction.guildId)
-    ]);
+    const [waterings, deaths, revivals, revivableDeathKeys] = await Promise.all(
+      [
+        this.repository.wateringLogHistory(interaction.guildId, startedAt),
+        this.repository.deathLogHistory(interaction.guildId, startedAt),
+        this.repository.revivalLogHistory(interaction.guildId, startedAt),
+        this.repository.revivableDeathKeys(interaction.guildId)
+      ]
+    );
     const history = [
       ...waterings.map((watering) => ({
         at: watering.wateredAt,
@@ -1347,6 +1361,13 @@ export class MarimoBot {
             notifyOwner: false,
             showRescueButton: revivableDeathKeys.has(deathKey(death))
           })
+      })),
+      ...revivals.map((revival) => ({
+        at: revival.revivedAt,
+        post: () =>
+          this.postRevivalLogToChannel(channel, revival, {
+            notifyOwner: false
+          })
       }))
     ].sort((left, right) => left.at.getTime() - right.at.getTime());
     for (const event of history) {
@@ -1358,6 +1379,10 @@ export class MarimoBot {
       interaction.channelId
     );
     await this.repository.markGuildWateringLogsDeliveredThrough(
+      interaction.guildId,
+      startedAt
+    );
+    await this.repository.markGuildRevivalLogsDeliveredThrough(
       interaction.guildId,
       startedAt
     );
@@ -1661,6 +1686,61 @@ export class MarimoBot {
     }
   }
 
+  private async postRevivalLog(revival: Revival): Promise<void> {
+    const config = await this.repository.getConfig(revival.guildId);
+    if (config.logChannelId === null) return;
+    const channel = await this.client.channels.fetch(config.logChannelId);
+    if (!(channel instanceof TextChannel)) {
+      throw new Error("Configured revival log channel is unavailable");
+    }
+    await this.postRevivalLogToChannel(channel, revival, {
+      notifyOwner: false,
+      deliveryKey: `revival:${revival.eventId}`
+    });
+  }
+
+  private async postRevivalLogToChannel(
+    channel: TextChannel,
+    revival: Revival,
+    options: LogPostOptions
+  ): Promise<void> {
+    const image = await renderLivingTankImage(revival);
+    const nonce =
+      options.deliveryKey === undefined
+        ? undefined
+        : logNonce(options.deliveryKey);
+    await channel.send({
+      content: revivalLogContent(revival),
+      files: [new AttachmentBuilder(image, { name: "marimo-tank.png" })],
+      allowedMentions: { parse: [] },
+      ...(nonce === undefined ? {} : { nonce, enforceNonce: true })
+    });
+  }
+
+  private async deliverRevivalLog(revival: Revival): Promise<void> {
+    if (this.revivalLogsInFlight.has(revival.eventId)) return;
+    this.revivalLogsInFlight.add(revival.eventId);
+    try {
+      await this.postRevivalLog(revival);
+      await this.repository.markRevivalLogDelivered(revival.eventId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.repository.markRevivalLogFailed(revival.eventId, message);
+      throw error;
+    } finally {
+      this.revivalLogsInFlight.delete(revival.eventId);
+    }
+  }
+
+  private async deliverPendingRevivalLogs(): Promise<void> {
+    const revivals = await this.repository.pendingRevivalLogs();
+    for (const revival of revivals) {
+      await this.runBestEffort("Revival log retry", () =>
+        this.deliverRevivalLog(revival)
+      );
+    }
+  }
+
   private async postDeathLog(
     death: DeadMarimo,
     options: { showRescueButton?: boolean } = {}
@@ -1790,6 +1870,7 @@ export class MarimoBot {
     await this.deliverDueWateringReminders();
     await this.refreshRankingPanels();
     await this.deliverPendingWateringLogs();
+    await this.deliverPendingRevivalLogs();
     await this.xpDelivery.deliverPending();
   }
 

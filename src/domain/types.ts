@@ -62,6 +62,11 @@ export type Revival = RankingEntry & {
   costXp: number;
   paymentMethod: RevivalPaymentMethod;
   rescuerUserId: string;
+  revivedAt: Date;
+};
+
+export type PendingRevivalLog = Revival & {
+  deliveryAttempts: number;
 };
 
 export type RankingEntry = LivingMarimo & {

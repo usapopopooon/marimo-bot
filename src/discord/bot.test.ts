@@ -16,6 +16,7 @@ import type {
   DeadMarimo,
   GuildConfig,
   RankingEntry,
+  Revival,
   Watering
 } from "../domain/types.js";
 import type { XpDelivery } from "../services/xp-delivery.js";
@@ -102,6 +103,15 @@ const death: DeadMarimo = {
   finalSizeMm: 10.01
 };
 
+const revival: Revival = {
+  ...living,
+  eventId: "00000000-0000-4000-8000-000000000099",
+  costXp: 1000,
+  paymentMethod: "xp",
+  rescuerUserId: "helper-user",
+  revivedAt: new Date("2026-08-10T01:30:00Z")
+};
+
 type InteractionDispatcher = {
   handleInteraction(interaction: Interaction): Promise<void>;
 };
@@ -133,6 +143,12 @@ type WateringLogDeliverer = {
   postWateringLog(watering: Watering): Promise<void>;
 };
 
+type RevivalLogDeliverer = {
+  deliverRevivalLog(revival: Revival): Promise<void>;
+  deliverPendingRevivalLogs(): Promise<void>;
+  postRevivalLog(revival: Revival): Promise<void>;
+};
+
 type LiveLogPoster = {
   client: Client;
   postWateringLog(watering: Watering): Promise<void>;
@@ -140,6 +156,7 @@ type LiveLogPoster = {
     death: DeadMarimo,
     options?: { showRescueButton?: boolean }
   ): Promise<void>;
+  postRevivalLog(revival: Revival): Promise<void>;
 };
 
 type ReminderDeliverer = {
@@ -149,6 +166,7 @@ type ReminderDeliverer = {
 
 type WaterInteractionHarness = {
   deliverWateringLog(watering: Watering): Promise<void>;
+  deliverRevivalLog(revival: Revival): Promise<void>;
   postDeathLog(
     death: DeadMarimo,
     options?: { showRescueButton?: boolean }
@@ -177,6 +195,11 @@ type LogRefresher = {
       deliveryKey?: string;
       showRescueButton?: boolean;
     }
+  ): Promise<void>;
+  postRevivalLogToChannel(
+    channel: TextChannel,
+    revival: Revival,
+    options: { notifyOwner: boolean; deliveryKey?: string }
   ): Promise<void>;
 };
 
@@ -798,13 +821,17 @@ describe("panel interaction wiring", () => {
       death,
       newlyDied: false
     });
-    const completeRevival = vi.fn().mockResolvedValue({
+    const completedRevival: Revival = {
       ...living,
       eventId,
       costXp: 1000,
       ageDays: 1,
-      sizeMm: 10.01
-    });
+      sizeMm: 10.01,
+      paymentMethod: "xp",
+      rescuerUserId: "2001",
+      revivedAt: new Date("2026-08-12T03:01:00Z")
+    };
+    const completeRevival = vi.fn().mockResolvedValue(completedRevival);
     const spendRevival = vi.fn().mockResolvedValue({
       status: "charged",
       costXp: 1000,
@@ -823,9 +850,10 @@ describe("panel interaction wiring", () => {
       },
       { revivalEnabled: true, spendRevival }
     );
-    (bot as unknown as WaterInteractionHarness).updateRankings = vi
-      .fn()
-      .mockResolvedValue(undefined);
+    const harness = bot as unknown as WaterInteractionHarness;
+    harness.updateRankings = vi.fn().mockResolvedValue(undefined);
+    const deliverRevivalLog = vi.fn().mockResolvedValue(undefined);
+    harness.deliverRevivalLog = deliverRevivalLog;
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await dispatch(bot, {
@@ -857,6 +885,7 @@ describe("panel interaction wiring", () => {
       costXp: 1000,
       now: expect.any(Date)
     });
+    expect(deliverRevivalLog).toHaveBeenCalledWith(completedRevival);
     expect(editReply).toHaveBeenCalledWith({
       content: [
         "🌿 **まりも** が生き返りました。",
@@ -892,19 +921,25 @@ describe("panel interaction wiring", () => {
         remainingXp: 250,
         duplicate: false
       });
-      const completeRevival = vi.fn().mockResolvedValue({
+      const completedRevival: Revival = {
         ...living,
         eventId,
         costXp: 1000,
         ageDays: 1,
-        sizeMm: 10.01
-      });
+        sizeMm: 10.01,
+        paymentMethod: "xp",
+        rescuerUserId,
+        revivedAt: new Date("2026-08-12T03:01:00Z")
+      };
+      const completeRevival = vi.fn().mockResolvedValue(completedRevival);
       const bot = botWith(
         { prepareRevival, completeRevival },
         { revivalEnabled: true, spendRevival }
       );
       const harness = bot as unknown as WaterInteractionHarness;
       harness.updateRankings = vi.fn().mockResolvedValue(undefined);
+      const deliverRevivalLog = vi.fn().mockResolvedValue(undefined);
+      harness.deliverRevivalLog = deliverRevivalLog;
       const editLog = vi.fn().mockResolvedValue(undefined);
       harness.fetchMessage = vi.fn().mockResolvedValue({ edit: editLog });
       const editReply = vi.fn().mockResolvedValue(undefined);
@@ -948,6 +983,7 @@ describe("panel interaction wiring", () => {
         costXp: 1000,
         now: expect.any(Date)
       });
+      expect(deliverRevivalLog).toHaveBeenCalledWith(completedRevival);
       expect(editLog).toHaveBeenCalledWith({
         content: expect.stringContaining(expectedLogText),
         components: [],
@@ -1126,13 +1162,17 @@ describe("panel interaction wiring", () => {
       death,
       newlyDied: false
     });
-    const completeRevival = vi.fn().mockResolvedValue({
+    const completedRevival: Revival = {
       ...living,
       eventId,
       costXp: 0,
       ageDays: 1,
-      sizeMm: 10.01
-    });
+      sizeMm: 10.01,
+      paymentMethod: "moss-cola",
+      rescuerUserId: "helper-user",
+      revivedAt: new Date("2026-08-12T03:01:00Z")
+    };
+    const completeRevival = vi.fn().mockResolvedValue(completedRevival);
     const spendRevivalItem = vi.fn().mockResolvedValue({
       status: "consumed",
       cardKey: "moss-cola",
@@ -1143,9 +1183,10 @@ describe("panel interaction wiring", () => {
       { prepareRevival, completeRevival },
       { itemRevivalEnabled: true, spendRevivalItem }
     );
-    (bot as unknown as WaterInteractionHarness).updateRankings = vi
-      .fn()
-      .mockResolvedValue(undefined);
+    const harness = bot as unknown as WaterInteractionHarness;
+    harness.updateRankings = vi.fn().mockResolvedValue(undefined);
+    const deliverRevivalLog = vi.fn().mockResolvedValue(undefined);
+    harness.deliverRevivalLog = deliverRevivalLog;
     const editLog = vi.fn().mockResolvedValue(undefined);
     const fetchMessage = vi.fn().mockResolvedValue({ edit: editLog });
     (bot as unknown as LogRefresher).fetchMessage = fetchMessage;
@@ -1191,6 +1232,7 @@ describe("panel interaction wiring", () => {
       costXp: 0,
       now: expect.any(Date)
     });
+    expect(deliverRevivalLog).toHaveBeenCalledWith(completedRevival);
     expect(fetchMessage).toHaveBeenCalledWith(
       "log-channel",
       "900000000000000000"
@@ -1803,6 +1845,63 @@ describe("panel interaction wiring", () => {
     expect(markWateringLogDelivered).toHaveBeenCalledWith(watering.eventId);
   });
 
+  it("retries an uncertain revival log post from the pending queue", async () => {
+    const markRevivalLogDelivered = vi.fn().mockResolvedValue(undefined);
+    const markRevivalLogFailed = vi.fn().mockResolvedValue(undefined);
+    const repository: Partial<MarimoRepository> = {
+      pendingRevivalLogs: vi.fn().mockResolvedValue([revival]),
+      markRevivalLogDelivered,
+      markRevivalLogFailed
+    };
+    const bot = botWith(repository) as unknown as RevivalLogDeliverer;
+    const postRevivalLog = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unknown Discord result"))
+      .mockResolvedValueOnce(undefined);
+    bot.postRevivalLog = postRevivalLog;
+
+    await expect(bot.deliverRevivalLog(revival)).rejects.toThrow(
+      "unknown Discord result"
+    );
+    await bot.deliverPendingRevivalLogs();
+
+    expect(postRevivalLog).toHaveBeenCalledTimes(2);
+    expect(markRevivalLogFailed).toHaveBeenCalledWith(
+      revival.eventId,
+      "unknown Discord result"
+    );
+    expect(markRevivalLogDelivered).toHaveBeenCalledWith(revival.eventId);
+  });
+
+  it("posts living revival images publicly without pinging either user", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "revival-message" });
+    const channel = textChannelWithSend(send);
+    const bot = botWith({
+      getConfig: vi.fn().mockResolvedValue({
+        ...guildConfig,
+        logChannelId: "3001"
+      })
+    }) as unknown as LiveLogPoster;
+    vi.spyOn(bot.client.channels, "fetch").mockResolvedValue(channel);
+
+    await bot.postRevivalLog(revival);
+
+    const payload = send.mock.calls[0]?.[0] as {
+      content: string;
+      files: { name: string }[];
+      allowedMentions: { parse: string[]; users?: string[] };
+      nonce?: string;
+      enforceNonce?: boolean;
+    };
+    expect(payload.content).toContain("<@2001> の **まりも** が生き返りました");
+    expect(payload.content).toContain("助けた人: <@helper-user>");
+    expect(payload.content).toContain("**1,000 XP**");
+    expect(payload.files[0]?.name).toBe("marimo-tank.png");
+    expect(payload.allowedMentions).toEqual({ parse: [] });
+    expect(payload.nonce).toHaveLength(25);
+    expect(payload.enforceNonce).toBe(true);
+  });
+
   it("notifies live milestones but keeps midnight death logs silent", async () => {
     const send = vi.fn().mockResolvedValue({ id: "death-message" });
     const channel = textChannelWithSend(send);
@@ -1958,14 +2057,20 @@ describe("panel interaction wiring", () => {
       wateredDate: "2026-08-10",
       isBirth: false
     };
+    const markGuildWateringLogsDeliveredThrough = vi
+      .fn()
+      .mockResolvedValue(undefined);
+    const markGuildRevivalLogsDeliveredThrough = vi
+      .fn()
+      .mockResolvedValue(undefined);
     const repository: Partial<MarimoRepository> = {
       setLogChannel: vi.fn().mockResolvedValue(undefined),
       wateringLogHistory: vi.fn().mockResolvedValue([watering, laterWatering]),
       deathLogHistory: vi.fn().mockResolvedValue([death]),
+      revivalLogHistory: vi.fn().mockResolvedValue([revival]),
       revivableDeathKeys: vi.fn().mockResolvedValue(new Set()),
-      markGuildWateringLogsDeliveredThrough: vi
-        .fn()
-        .mockResolvedValue(undefined)
+      markGuildWateringLogsDeliveredThrough,
+      markGuildRevivalLogsDeliveredThrough
     };
     const bot = botWith(repository) as unknown as LogRefresher;
     Object.defineProperty(bot.client, "user", { value: { id: "bot" } });
@@ -1974,9 +2079,11 @@ describe("panel interaction wiring", () => {
     const findMarimoLogs = vi.fn().mockResolvedValue([oldLog]);
     const postWateringLogToChannel = vi.fn().mockResolvedValue(undefined);
     const postDeathLogToChannel = vi.fn().mockResolvedValue(undefined);
+    const postRevivalLogToChannel = vi.fn().mockResolvedValue(undefined);
     bot.findMarimoLogs = findMarimoLogs;
     bot.postWateringLogToChannel = postWateringLogToChannel;
     bot.postDeathLogToChannel = postDeathLogToChannel;
+    bot.postRevivalLogToChannel = postRevivalLogToChannel;
     const channel = logChannel();
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const deleteReply = vi.fn().mockResolvedValue(undefined);
@@ -2003,6 +2110,9 @@ describe("panel interaction wiring", () => {
       notifyOwner: false,
       showRescueButton: false
     });
+    expect(postRevivalLogToChannel).toHaveBeenCalledWith(channel, revival, {
+      notifyOwner: false
+    });
     expect(postWateringLogToChannel).toHaveBeenNthCalledWith(
       2,
       channel,
@@ -2014,6 +2124,10 @@ describe("panel interaction wiring", () => {
         Number.POSITIVE_INFINITY
     );
     expect(postDeathLogToChannel.mock.invocationCallOrder[0]).toBeLessThan(
+      postRevivalLogToChannel.mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY
+    );
+    expect(postRevivalLogToChannel.mock.invocationCallOrder[0]).toBeLessThan(
       postWateringLogToChannel.mock.invocationCallOrder[1] ??
         Number.POSITIVE_INFINITY
     );
@@ -2021,6 +2135,14 @@ describe("panel interaction wiring", () => {
       deleteOldLog.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
     );
     expect(deleteOldLog).toHaveBeenCalledOnce();
+    expect(markGuildWateringLogsDeliveredThrough).toHaveBeenCalledWith(
+      "1001",
+      expect.any(Date)
+    );
+    expect(markGuildRevivalLogsDeliveredThrough).toHaveBeenCalledWith(
+      "1001",
+      expect.any(Date)
+    );
     expect(deleteReply).toHaveBeenCalledOnce();
     expect(editReply).not.toHaveBeenCalled();
   });
@@ -2033,9 +2155,11 @@ describe("panel interaction wiring", () => {
     const findMarimoLogs = vi.fn().mockResolvedValue([]);
     const postWateringLogToChannel = vi.fn().mockResolvedValue(undefined);
     const postDeathLogToChannel = vi.fn().mockResolvedValue(undefined);
+    const postRevivalLogToChannel = vi.fn().mockResolvedValue(undefined);
     bot.findMarimoLogs = findMarimoLogs;
     bot.postWateringLogToChannel = postWateringLogToChannel;
     bot.postDeathLogToChannel = postDeathLogToChannel;
+    bot.postRevivalLogToChannel = postRevivalLogToChannel;
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await bot.repostAllLogs({
@@ -2056,6 +2180,7 @@ describe("panel interaction wiring", () => {
     expect(findMarimoLogs).not.toHaveBeenCalled();
     expect(postWateringLogToChannel).not.toHaveBeenCalled();
     expect(postDeathLogToChannel).not.toHaveBeenCalled();
+    expect(postRevivalLogToChannel).not.toHaveBeenCalled();
     expect(setLogChannel).not.toHaveBeenCalled();
   });
 
@@ -2065,6 +2190,7 @@ describe("panel interaction wiring", () => {
       setLogChannel,
       wateringLogHistory: vi.fn().mockResolvedValue([watering]),
       deathLogHistory: vi.fn().mockResolvedValue([]),
+      revivalLogHistory: vi.fn().mockResolvedValue([]),
       revivableDeathKeys: vi.fn().mockResolvedValue(new Set())
     };
     const bot = botWith(repository) as unknown as LogRefresher;
@@ -2075,6 +2201,7 @@ describe("panel interaction wiring", () => {
       .fn()
       .mockRejectedValue(new Error("Discord send failed"));
     bot.postDeathLogToChannel = vi.fn().mockResolvedValue(undefined);
+    bot.postRevivalLogToChannel = vi.fn().mockResolvedValue(undefined);
 
     await expect(
       bot.repostAllLogs({

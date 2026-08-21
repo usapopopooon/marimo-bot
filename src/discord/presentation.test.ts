@@ -19,6 +19,7 @@ import {
   mossColaRescueTarget,
   mossColaRevivalConfirmation,
   rankingPanel,
+  revivalLogContent,
   removeDeathLogRescueHelp,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
@@ -513,6 +514,36 @@ describe("Discord presentation", () => {
     expect(memorial).toContain("**\\*\\*飼い主\\*\\***さんの");
     expect(memorial).not.toContain("<@owner>");
     expect(memorial).not.toContain("https://");
+  });
+
+  it("shows the owner, rescuer, and payment in public revival logs", () => {
+    const base = {
+      ...entry("owner", 4, 10.9),
+      eventId: "00000000-0000-4000-8000-000000000099",
+      revivedAt: new Date("2026-08-13T03:00:00Z")
+    };
+
+    const xpRescue = revivalLogContent({
+      ...base,
+      costXp: 1000,
+      paymentMethod: "xp",
+      rescuerUserId: "helper"
+    });
+    const mossColaSelfRevival = revivalLogContent({
+      ...base,
+      costXp: 0,
+      paymentMethod: "moss-cola",
+      rescuerUserId: "owner"
+    });
+
+    expect(xpRescue).toContain(
+      "🟢 <@owner> の **ownerのまりも** が生き返りました"
+    );
+    expect(xpRescue).toContain("🌿 助けた人: <@helper>｜**1,000 XP**");
+    expect(xpRescue).toContain("第1世代｜飼育 **4日**｜**10.90 mm**");
+    expect(mossColaSelfRevival).toContain(
+      "🫧 助けた人: <@owner>｜**苔コーラ 1本**"
+    );
   });
 
   it("shows the next increasing XP reward in personal status", () => {
