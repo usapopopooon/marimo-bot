@@ -4,6 +4,7 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  type GuildBan,
   GuildMember,
   PermissionFlagsBits,
   REST,
@@ -99,6 +100,7 @@ function configuredChannel(
 }
 
 const MARIMO_LOG_FILES = new Set(["marimo-tank.png", "marimo-memorial.png"]);
+const DISCORD_BAN_CACHE_MS = 5 * 60_000;
 
 type LogPostOptions = {
   notifyOwner: boolean;
@@ -229,7 +231,13 @@ function errorDetails(error: unknown): Record<string, unknown> {
 }
 
 export class MarimoBot {
-  private readonly client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  private readonly client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildModeration]
+  });
+  private readonly knownDiscordBansByGuild = new Map<string, Set<string>>();
+  private readonly knownRankingBlocksByGuild = new Map<string, Set<string>>();
+  private readonly discordBanFetchedAtByGuild = new Map<string, number>();
+  private readonly discordBanRetryAtByGuild = new Map<string, number>();
   private readonly revivalLogsInFlight = new Set<string>();
   private readonly wateringLogsInFlight = new Set<string>();
   private sweepTimer: NodeJS.Timeout | undefined;
@@ -252,7 +260,30 @@ export class MarimoBot {
         this.finishStartup(readyClient.user.id)
       );
     });
+    this.client.on(Events.GuildBanAdd, (ban) => {
+      this.handleGuildBanChange(ban, true);
+    });
+    this.client.on(Events.GuildBanRemove, (ban) => {
+      this.handleGuildBanChange(ban, false);
+    });
     await this.client.login(this.config.DISCORD_TOKEN);
+  }
+
+  private handleGuildBanChange(ban: GuildBan, banned: boolean): void {
+    const guildId = ban.guild.id;
+    const known = new Set(this.knownDiscordBansByGuild.get(guildId) ?? []);
+    if (banned) known.add(ban.user.id);
+    else known.delete(ban.user.id);
+    this.knownDiscordBansByGuild.set(guildId, known);
+    const rankingBlocks = new Set(
+      this.knownRankingBlocksByGuild.get(guildId) ?? []
+    );
+    if (banned) rankingBlocks.add(ban.user.id);
+    else rankingBlocks.delete(ban.user.id);
+    this.knownRankingBlocksByGuild.set(guildId, rankingBlocks);
+    this.runInBackground("Guild ban ranking update", () =>
+      this.updateRankings(guildId, new Date())
+    );
   }
 
   public async stop(): Promise<void> {
@@ -1221,11 +1252,23 @@ export class MarimoBot {
     if (kind === "water") {
       payload = waterPanel(this.config.WATER_XP);
     } else if (kind === "size") {
-      const entries = await this.repository.rankings(interaction.guildId, now);
-      payload = rankingPanel(entries, now);
+      const [entries, blockedUserIds] = await Promise.all([
+        this.repository.rankings(interaction.guildId, now),
+        this.rankingBlockedUserIds(interaction.guildId)
+      ]);
+      payload = rankingPanel(
+        entries.filter((entry) => !blockedUserIds.has(entry.userId)),
+        now
+      );
     } else {
-      const entries = await this.repository.deadRankings(interaction.guildId);
-      payload = deadRankingPanel(entries, now);
+      const [entries, blockedUserIds] = await Promise.all([
+        this.repository.deadRankings(interaction.guildId),
+        this.rankingBlockedUserIds(interaction.guildId)
+      ]);
+      payload = deadRankingPanel(
+        entries.filter((entry) => !blockedUserIds.has(entry.userId)),
+        now
+      );
     }
     const message = await interaction.channel.send({
       ...payload,
@@ -1370,25 +1413,97 @@ export class MarimoBot {
   }
 
   private async updateRankings(guildId: string, now: Date): Promise<void> {
-    const [config, livingEntries, deadEntries] = await Promise.all([
-      this.repository.getConfig(guildId),
-      this.repository.rankings(guildId, now),
-      this.repository.deadRankings(guildId)
-    ]);
+    const [config, livingEntries, deadEntries, blockedUserIds] =
+      await Promise.all([
+        this.repository.getConfig(guildId),
+        this.repository.rankings(guildId, now),
+        this.repository.deadRankings(guildId),
+        this.rankingBlockedUserIds(guildId)
+      ]);
+    const visibleLivingEntries = livingEntries.filter(
+      (entry) => !blockedUserIds.has(entry.userId)
+    );
+    const visibleDeadEntries = deadEntries.filter(
+      (entry) => !blockedUserIds.has(entry.userId)
+    );
     await Promise.all([
       this.editRanking(
         config.sizePanelChannelId,
         config.sizePanelMessageId,
-        livingEntries,
+        visibleLivingEntries,
         now
       ),
       this.editDeadRanking(
         config.deadPanelChannelId,
         config.deadPanelMessageId,
-        deadEntries,
+        visibleDeadEntries,
         now
       )
     ]);
+  }
+
+  private async rankingBlockedUserIds(guildId: string): Promise<Set<string>> {
+    const discordBans = this.discordBannedUserIds(guildId);
+    const fallbackBlocks = this.xpDelivery.rankingBlockedUserIds(guildId);
+    const [discordResult, fallbackResult] = await Promise.allSettled([
+      discordBans,
+      fallbackBlocks
+    ]);
+    const successful = [discordResult, fallbackResult].filter(
+      (result) => result.status === "fulfilled"
+    );
+    if (successful.length === 0) {
+      const known = this.knownRankingBlocksByGuild.get(guildId);
+      if (known !== undefined) return new Set(known);
+      throw new Error("No ranking exclusion source is available");
+    }
+    const blocked = new Set(
+      discordResult.status === "rejected" ||
+        fallbackResult.status === "rejected"
+        ? (this.knownRankingBlocksByGuild.get(guildId) ?? [])
+        : []
+    );
+    for (const userId of this.knownDiscordBansByGuild.get(guildId) ?? []) {
+      blocked.add(userId);
+    }
+    if (discordResult.status === "fulfilled") {
+      for (const userId of discordResult.value) blocked.add(userId);
+    }
+    if (fallbackResult.status === "fulfilled") {
+      for (const userId of fallbackResult.value) blocked.add(userId);
+    }
+    this.knownRankingBlocksByGuild.set(guildId, blocked);
+    return blocked;
+  }
+
+  private async discordBannedUserIds(guildId: string): Promise<Set<string>> {
+    const now = Date.now();
+    const known = this.knownDiscordBansByGuild.get(guildId);
+    const fetchedAt = this.discordBanFetchedAtByGuild.get(guildId);
+    if (
+      known !== undefined &&
+      fetchedAt !== undefined &&
+      now - fetchedAt < DISCORD_BAN_CACHE_MS
+    ) {
+      return new Set(known);
+    }
+    const retryAt = this.discordBanRetryAtByGuild.get(guildId);
+    if (retryAt !== undefined && retryAt > now) {
+      throw new Error("Discord ban access is temporarily unavailable");
+    }
+    const guild = this.client.guilds.cache.get(guildId);
+    if (guild === undefined) throw new Error("Discord guild is unavailable");
+    try {
+      const bans = await guild.bans.fetch();
+      const userIds = new Set(bans.keys());
+      this.knownDiscordBansByGuild.set(guildId, userIds);
+      this.discordBanFetchedAtByGuild.set(guildId, now);
+      this.discordBanRetryAtByGuild.delete(guildId);
+      return userIds;
+    } catch (error) {
+      this.discordBanRetryAtByGuild.set(guildId, now + DISCORD_BAN_CACHE_MS);
+      throw error;
+    }
   }
 
   private async refreshWaterPanels(): Promise<void> {

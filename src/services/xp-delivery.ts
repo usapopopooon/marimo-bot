@@ -68,6 +68,50 @@ export class XpDelivery {
     return url.toString();
   }
 
+  private rankingExclusionsUrl(guildId: string): string | undefined {
+    if (this.config.XP_WEBHOOK_URL === undefined) return undefined;
+    const url = new URL(this.config.XP_WEBHOOK_URL);
+    if (!url.pathname.endsWith("/watering-events")) return undefined;
+    url.pathname = url.pathname.replace(
+      /\/watering-events$/,
+      "/ranking-exclusions"
+    );
+    url.searchParams.set("guild_id", guildId);
+    return url.toString();
+  }
+
+  public async rankingBlockedUserIds(guildId: string): Promise<Set<string>> {
+    const url = this.rankingExclusionsUrl(guildId);
+    if (url === undefined) {
+      throw new Error("Ranking exclusions integration is disabled");
+    }
+    const headers: Record<string, string> = {};
+    if (this.config.XP_WEBHOOK_TOKEN !== undefined) {
+      headers.authorization = `Bearer ${this.config.XP_WEBHOOK_TOKEN}`;
+    }
+    const response = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Ranking exclusions API returned HTTP ${response.status}`
+      );
+    }
+    const body: unknown = await response.json();
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("blocked_user_ids" in body) ||
+      !Array.isArray(body.blocked_user_ids) ||
+      !body.blocked_user_ids.every((userId) => typeof userId === "string")
+    ) {
+      throw new Error("Ranking exclusions API returned an invalid response");
+    }
+    return new Set(body.blocked_user_ids);
+  }
+
   public async spendRevival(input: {
     eventId: string;
     guildId: string;

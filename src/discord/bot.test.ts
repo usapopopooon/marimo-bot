@@ -1,11 +1,13 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import {
+  GatewayIntentBits,
   PermissionFlagsBits,
   PermissionsBitField,
   TextChannel,
   type Client,
   type ChatInputCommandInteraction,
+  type GuildBan,
   type Interaction,
   type Message,
   type ModalBuilder
@@ -137,6 +139,12 @@ type RankingUpdater = {
   fetchMessage(channelId: string, messageId: string): Promise<Message | null>;
 };
 
+type BanAwareRankingUpdater = RankingUpdater & {
+  handleGuildBanChange(ban: GuildBan, banned: boolean): void;
+  rankingBlockedUserIds(guildId: string): Promise<Set<string>>;
+  runInBackground(operation: string, task: () => Promise<void>): void;
+};
+
 type WateringLogDeliverer = {
   deliverWateringLog(watering: Watering): Promise<void>;
   deliverPendingWateringLogs(): Promise<void>;
@@ -228,7 +236,10 @@ function botWith(
       recordDeathLogMessage: vi.fn().mockResolvedValue(undefined),
       ...repository
     } as MarimoRepository,
-    xpDelivery as XpDelivery,
+    {
+      rankingBlockedUserIds: vi.fn().mockResolvedValue(new Set<string>()),
+      ...xpDelivery
+    } as XpDelivery,
     config,
     pino({ level: "silent" })
   );
@@ -1566,6 +1577,103 @@ describe("panel interaction wiring", () => {
       [death],
       now
     );
+  });
+
+  it("removes fallback-blocked users from both persistent rankings", async () => {
+    const visibleLiving = { ...living, id: "2", userId: "2002" };
+    const visibleDeath = { ...death, id: "3", userId: "2003" };
+    const configured = {
+      ...guildConfig,
+      sizePanelChannelId: "size-channel",
+      sizePanelMessageId: "size-message",
+      deadPanelChannelId: "dead-channel",
+      deadPanelMessageId: "dead-message"
+    };
+    const rankingBlockedUserIds = vi.fn().mockResolvedValue(new Set(["2001"]));
+    const bot = botWith(
+      {
+        getConfig: vi.fn().mockResolvedValue(configured),
+        rankings: vi.fn().mockResolvedValue([living, visibleLiving]),
+        deadRankings: vi.fn().mockResolvedValue([death, visibleDeath])
+      },
+      { rankingBlockedUserIds }
+    ) as unknown as RankingUpdater;
+    const editRanking = vi.fn().mockResolvedValue(undefined);
+    const editDeadRanking = vi.fn().mockResolvedValue(undefined);
+    bot.editRanking = editRanking;
+    bot.editDeadRanking = editDeadRanking;
+    const now = new Date("2026-08-10T00:00:00Z");
+
+    await bot.updateRankings("1001", now);
+
+    expect(rankingBlockedUserIds).toHaveBeenCalledOnce();
+    expect(editRanking).toHaveBeenCalledWith(
+      "size-channel",
+      "size-message",
+      [visibleLiving],
+      now
+    );
+    expect(editDeadRanking).toHaveBeenCalledWith(
+      "dead-channel",
+      "dead-message",
+      [visibleDeath],
+      now
+    );
+  });
+
+  it("uses Discord bans when the fallback API is unavailable", async () => {
+    const bot = botWith(
+      {},
+      {
+        rankingBlockedUserIds: vi
+          .fn()
+          .mockRejectedValue(new Error("level-bot unavailable"))
+      }
+    ) as unknown as BanAwareRankingUpdater;
+    const fetchBans = vi.fn().mockResolvedValue(new Map([["2001", {}]]));
+    bot.client.guilds.cache.set("1001", {
+      bans: {
+        fetch: fetchBans
+      }
+    });
+
+    await expect(bot.rankingBlockedUserIds("1001")).resolves.toEqual(
+      new Set(["2001"])
+    );
+    await expect(bot.rankingBlockedUserIds("1001")).resolves.toEqual(
+      new Set(["2001"])
+    );
+    expect(fetchBans).toHaveBeenCalledOnce();
+  });
+
+  it("keeps ban events blocked before either external source catches up", async () => {
+    const bot = botWith({}) as unknown as BanAwareRankingUpdater;
+    const runInBackground = vi.fn();
+    bot.runInBackground = runInBackground;
+    const ban = {
+      guild: { id: "1001" },
+      user: { id: "2001" }
+    } as GuildBan;
+
+    bot.handleGuildBanChange(ban, true);
+    expect(await bot.rankingBlockedUserIds("1001")).toEqual(new Set(["2001"]));
+    expect(runInBackground).toHaveBeenCalledWith(
+      "Guild ban ranking update",
+      expect.any(Function)
+    );
+
+    bot.handleGuildBanChange(ban, false);
+    expect(await bot.rankingBlockedUserIds("1001")).toEqual(new Set());
+  });
+
+  it("enables guild moderation events for immediate ban refreshes", () => {
+    const bot = botWith({}) as unknown as RankingUpdater;
+
+    expect(
+      (bot.client as unknown as Client).options.intents.has(
+        GatewayIntentBits.GuildModeration
+      )
+    ).toBe(true);
   });
 
   it("converts the existing water panel to an embed during refresh", async () => {

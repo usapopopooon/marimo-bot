@@ -19,6 +19,7 @@
 - 水替え画像の投稿結果が不明または失敗した場合は、未投稿記録から再投稿する。
 - 大きさランキングは表示上の大きさだけで順位を決め、水替え・死亡のたびに同じ常設投稿を編集する。
 - 枯れたまりもランキングは、復活していない歴代まりもの最終サイズを別の常設投稿で表示し、死亡・復活のたびに更新する。
+- 大きさ・枯れたまりもランキングにはBAN済みユーザーを表示しない。Botに「メンバーをBAN」権限があればDiscordのBAN一覧を使い、権限がない場合や取得失敗時はlevel-botの非在籍・表示除外情報へフォールバックする。BANイベントを受信できる場合は常設パネルを即時更新する。
 
 ## Discord コマンド
 
@@ -61,7 +62,8 @@ JSONで繰り返し送信する。
 level-bot 側の受信先は
 `/api/v1/integrations/marimo/watering-events`。復活費用の確定先は
 `/api/v1/integrations/marimo/revival-spends`、重複した苔コーラの消費先は
-`/api/v1/integrations/marimo/revival-item-spends`。両Botに同じ
+`/api/v1/integrations/marimo/revival-item-spends`、ランキング除外情報の取得先は
+`/api/v1/integrations/marimo/ranking-exclusions`。両Botに同じ
 `MARIMO_BOT_API_TOKEN` / `XP_WEBHOOK_TOKEN` を設定する。受信側は `event_id` で冪等に
 反映するため、通信失敗後の再送でもXPの付与・消費は重複しない。Webhook未設定時も
 付与予定はoutboxに残り、設定後に配信される。

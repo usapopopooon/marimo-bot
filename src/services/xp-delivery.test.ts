@@ -31,6 +31,36 @@ function config(): Config {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("XP delivery wiring", () => {
+  it("loads ranking exclusions from the level-bot fallback endpoint", async () => {
+    const fallbackConfig = config();
+    fallbackConfig.XP_WEBHOOK_URL =
+      "https://level.example.test/api/v1/integrations/marimo/watering-events";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ blocked_user_ids: ["2002", "2003"] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const delivery = new XpDelivery(
+      {
+        pendingXp: vi.fn().mockResolvedValue([]),
+        markXpDelivered: vi.fn().mockResolvedValue(undefined),
+        markXpFailed: vi.fn().mockResolvedValue(undefined)
+      },
+      fallbackConfig,
+      pino({ level: "silent" })
+    );
+
+    await expect(delivery.rankingBlockedUserIds("1001")).resolves.toEqual(
+      new Set(["2002", "2003"])
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://level.example.test/api/v1/integrations/marimo/ranking-exclusions?guild_id=1001",
+      expect.objectContaining({
+        method: "GET",
+        headers: { authorization: "Bearer secret" }
+      })
+    );
+  });
+
   it("passes each Discord identifier to the correct webhook field", async () => {
     const delivered: string[] = [];
     const repository: XpRepository = {
