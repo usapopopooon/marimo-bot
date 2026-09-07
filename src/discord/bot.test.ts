@@ -533,7 +533,7 @@ describe("panel interaction wiring", () => {
     expect(reply?.content).toContain("大きさ **10.00 mm**");
     expect(reply?.content).toContain("水換え通知 **OFF**");
     expect(reply?.content).toContain(
-      "> 🟢 まるぽん「底の石が動いた気がする。石は知らないって。ぼくは今日も動いてないから、たぶん関係ない。」"
+      "> 🟢 まるぽん「きょう、底の石が動いた気がする。ぼくは今日も動いてないから、たぶん関係ない。」"
     );
     expect(reply?.files).toHaveLength(1);
     expect(reply?.files[0]?.name).toBe("marimo-tank.png");

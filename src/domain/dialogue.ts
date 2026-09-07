@@ -43,15 +43,35 @@ function buildCategory(
       `${category} dialogue fragments must contain 10 entries each`
     );
   }
+  const firstSentence = (text: string): string =>
+    /^.*?[。！？]/u.exec(text)?.[0] ?? text;
+
   return beginnings.flatMap((beginning, beginningIndex) =>
-    endings.map((ending, endingIndex) => ({
-      id: `${category}-${String(beginningIndex + 1).padStart(2, "0")}-${String(endingIndex + 1).padStart(2, "0")}`,
-      text: `${beginning}${ending}`,
-      motifIds: [
-        `${category}:beginning:${beginningIndex + 1}`,
-        `${category}:ending:${endingIndex + 1}`
-      ]
-    }))
+    endings.map((ending, endingIndex) => {
+      const beginningMotif = `${category}:beginning:${beginningIndex + 1}`;
+      const endingMotif = `${category}:ending:${endingIndex + 1}`;
+      const isSingleBeat = endingIndex === (beginningIndex * 7 + 3) % 10;
+
+      if (isSingleBeat) {
+        return {
+          id: `${category}-${String(beginningIndex + 1).padStart(2, "0")}-${String(endingIndex + 1).padStart(2, "0")}`,
+          text: beginning,
+          motifIds: [beginningMotif]
+        };
+      }
+
+      const shape = (beginningIndex * 3 + endingIndex * 7) % 6;
+      const shapedBeginning =
+        shape === 0 || shape === 2 ? firstSentence(beginning) : beginning;
+      const shapedEnding =
+        shape === 0 || shape === 1 ? firstSentence(ending) : ending;
+
+      return {
+        id: `${category}-${String(beginningIndex + 1).padStart(2, "0")}-${String(endingIndex + 1).padStart(2, "0")}`,
+        text: `${shapedBeginning}${shapedEnding}`,
+        motifIds: [beginningMotif, endingMotif]
+      };
+    })
   );
 }
 
@@ -86,16 +106,16 @@ const BIRTH_DIALOGUES = buildCategory(
 const EARLY_DIALOGUES = buildCategory(
   "early",
   [
-    "水草から新人研修を受けました。内容は揺れることでした。",
-    "水槽をひとまわりした気分です。",
+    "きょう、水草から新人研修を受けました。内容は揺れることでした。",
+    "さっき、水槽をひとまわりした気分になりました。",
     "きのうより少し育ったらしいです。",
-    "水替えの音、ちょっとわかるようになりました。",
-    "同じ泡を三回見ました。たぶん同期です。",
+    "きょうは、水替えの音がちょっとわかるようになりました。",
+    "きょう、同じ泡を三回見ました。たぶん同期です。",
     "朝からずっと、同じ場所を探検していました。",
-    "泡の流れに乗る練習をしました。",
-    "この水槽、早くも実家みたいです。",
-    "丸みを調整中です。調整前との違いは不明です。",
-    "お水が新しくなって、景色がくっきり。"
+    "さっき、泡の流れに乗る練習をしました。",
+    "このごろ、この水槽が早くも実家みたいです。",
+    "きょうは、丸みを調整中です。調整前との違いは不明です。",
+    "きょう、お水が新しくなって、景色がくっきり。"
   ],
   [
     "本日の成長、こっそり進行中です。",
@@ -114,16 +134,16 @@ const EARLY_DIALOGUES = buildCategory(
 const EVERYDAY_DIALOGUES = buildCategory(
   "everyday",
   [
-    "底の石が動いた気がする。石は知らないって。",
-    "水草から相談されたけど、聞こえないふりをした。",
-    "同じ泡を三回見た。たぶん顔なじみ。",
+    "きょう、底の石が動いた気がする。石は知らないって。",
+    "きょう、水草から相談されたけど、聞こえないふりをした。",
+    "きょう、同じ泡を三回見た。たぶん顔なじみ。",
     "きょうの水、ちょっと木曜日の味がする。",
-    "水槽のすみで何か始まっていた。",
-    "泡から伝言を預かったけど、宛名が水だった。",
-    "水草と目が合った気がする。水草に目はないらしい。",
-    "小石に呼び止められたけど、急いでるふりをした。",
-    "知らない透明が増えた気がする。",
-    "水面にもうひとりいた。動きがぴったりだった。"
+    "さっき、水槽のすみで何か始まっていた。",
+    "さっき、泡から伝言を預かったけど、宛名が水だった。",
+    "きょう、水草と目が合った気がする。水草に目はないらしい。",
+    "さっき、小石に呼び止められたけど、急いでるふりをした。",
+    "きょう、知らない透明が増えた気がする。",
+    "さっき、水面にもうひとりいた。動きがぴったりだった。"
   ],
   [
     "ぼくは今日も動いてないから、たぶん関係ない。",

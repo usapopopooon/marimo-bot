@@ -24,7 +24,39 @@ describe("marimo dialogue", () => {
       expect(line.text.length).toBeGreaterThanOrEqual(10);
       expect(line.text.length).toBeLessThanOrEqual(120);
       expect(line.text).not.toMatch(/\r|\n|<@|@everyone|@here|https?:\/\//i);
-      expect(line.motifIds).toHaveLength(2);
+      expect(line.motifIds.length).toBeGreaterThanOrEqual(1);
+      expect(line.motifIds.length).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("varies the number of beats instead of always joining two full fragments", () => {
+    for (const category of [
+      "birth",
+      "early",
+      "everyday",
+      "bond",
+      "milestone",
+      "large",
+      "morning",
+      "daytime",
+      "evening",
+      "latenight",
+      "spring",
+      "summer",
+      "autumn",
+      "winter"
+    ]) {
+      const categoryLines = MARIMO_DIALOGUES.filter((line) =>
+        line.id.startsWith(`${category}-`)
+      );
+      const sentenceCounts = new Set(
+        categoryLines.map((line) => line.text.match(/[。！？]/gu)?.length ?? 0)
+      );
+
+      expect(
+        categoryLines.filter((line) => line.motifIds.length === 1)
+      ).toHaveLength(10);
+      expect(sentenceCounts.size).toBeGreaterThanOrEqual(3);
     }
   });
 
@@ -49,17 +81,15 @@ describe("marimo dialogue", () => {
       line.id.startsWith("everyday-")
     );
     const requestedSetups = [
-      "底の石が動いた気がする。石は知らないって。",
-      "水草から相談されたけど、聞こえないふりをした。",
-      "同じ泡を三回見た。たぶん顔なじみ。",
+      "きょう、底の石が動いた気がする。石は知らないって。",
+      "きょう、水草から相談されたけど、聞こえないふりをした。",
+      "きょう、同じ泡を三回見た。たぶん顔なじみ。",
       "きょうの水、ちょっと木曜日の味がする。"
     ];
 
     expect(everyday).toHaveLength(100);
     for (const setup of requestedSetups) {
-      expect(
-        everyday.filter((line) => line.text.startsWith(setup))
-      ).toHaveLength(10);
+      expect(everyday.some((line) => line.text.startsWith(setup))).toBe(true);
     }
     expect(everyday.some((line) => line.text.includes("ぼくより行動力"))).toBe(
       true
@@ -69,8 +99,29 @@ describe("marimo dialogue", () => {
       true
     );
     for (const line of everyday) {
+      expect(line.text).toMatch(/^(きょう|さっき)/);
       expect(line.text).not.toMatch(/飼い主|監視|背後|呪|怖|逃げ|助けて/);
     }
+    expect(
+      everyday.some((line) =>
+        line.text.startsWith("同じ泡を三回見た。たぶん顔なじみ。")
+      )
+    ).toBe(false);
+  });
+
+  it("keeps early-care observations scoped to the current visit", () => {
+    const early = MARIMO_DIALOGUES.filter((line) =>
+      line.id.startsWith("early-")
+    );
+
+    for (const line of early) {
+      expect(line.text).toMatch(/^(きょう|さっき|きのう|朝から|このごろ)/);
+    }
+    expect(
+      early.some((line) =>
+        line.text.startsWith("きょう、同じ泡を三回見ました。たぶん同期です。")
+      )
+    ).toBe(true);
   });
 
   it("keeps every late-night variation quiet, time-aware, and non-directive", () => {
@@ -87,17 +138,19 @@ describe("marimo dialogue", () => {
       expect(line.text).not.toMatch(
         /そばで|いっしょに|なれたら|そっと預か|降りてきました|やさしいところ/
       );
-      expect(line.text).toMatch(
-        /普段から|違いは、時間だけ|顔はありません|先に落ち着いて|たぶん泡|差は不明|特別な仕事|確認はできません|見分け方はありません|最初から少なめ/
-      );
     }
     expect(
-      lateNight.filter((line) =>
+      lateNight.some((line) =>
         line.text.includes(
           "実は、さっきまで寝ていました。いえ、寝ていません。見分け方はありません。"
         )
       )
-    ).toHaveLength(10);
+    ).toBe(true);
+    expect(
+      lateNight.some((line) =>
+        line.text.endsWith("今夜の予定は、もう残っていません。")
+      )
+    ).toBe(true);
   });
 
   it("does not infer room brightness from the time of day", () => {
