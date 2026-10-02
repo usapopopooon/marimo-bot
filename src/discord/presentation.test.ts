@@ -19,6 +19,7 @@ import {
   mossColaRescueTarget,
   mossColaRevivalConfirmation,
   rankingPanel,
+  rankingPageTarget,
   revivalLogContent,
   removeDeathLogRescueHelp,
   REMINDER_BUTTON_ID,
@@ -425,6 +426,100 @@ describe("Discord presentation", () => {
       .embeds[0]?.data.description;
 
     expect(ranking).toContain("まだ枯れたまりもはいません。");
+  });
+
+  it("keeps a growing dead ranking within Discord's embed limit", () => {
+    const entries = Array.from({ length: 72 }, (_, index) => ({
+      ...deadEntry(String(100000000000000000n + BigInt(index)), 1, 100 - index),
+      name: "長く育ててきた大切なまりもちゃん"
+    }));
+
+    const panel = deadRankingPanel(entries, new Date("2026-10-02T00:00:00Z"));
+
+    expect(panel.embeds[0]?.toJSON().description?.length).toBeLessThanOrEqual(
+      4096
+    );
+  });
+
+  it.each(["size", "dead"] as const)(
+    "keeps every %s ranking entry and global tied rank across pages",
+    (kind) => {
+      const entries = Array.from({ length: 250 }, (_, index) => ({
+        ...entry(
+          String(100000000000000000n + BigInt(index)),
+          1,
+          index < 130 ? 100 : 99
+        ),
+        diedAt: new Date("2026-10-01T15:00:00Z"),
+        finalSizeMm: index < 130 ? 100 : 99,
+        name: "**まりも**".repeat(4)
+      }));
+      const render = kind === "dead" ? deadRankingPanel : rankingPanel;
+      const displayedRows: string[] = [];
+      let page = 0;
+      for (; page < 20; page++) {
+        const panel = render(entries, new Date("2026-10-02T00:00:00Z"), page);
+        const embed = panel.embeds[0]?.toJSON();
+        if (embed?.description === undefined || embed.title === undefined) {
+          throw new Error("Expected a ranking embed with a title and rows");
+        }
+        const description = embed.description;
+        expect(description.length).toBeLessThanOrEqual(4096);
+        expect(description.length + embed.title.length).toBeLessThanOrEqual(
+          6000
+        );
+        displayedRows.push(
+          ...description.split("\n").filter((line) => line.startsWith("**"))
+        );
+        const previous = panel.components[0]?.components[0]?.toJSON();
+        const next = panel.components[0]?.components[1]?.toJSON();
+        if (previous === undefined || next === undefined) {
+          throw new Error("Expected both ranking pagination buttons");
+        }
+        expect(previous.disabled).toBe(page === 0);
+        if (next.disabled) break;
+        expect(
+          "custom_id" in next && rankingPageTarget(next.custom_id)
+        ).toEqual({ kind, page: page + 1 });
+      }
+      expect(page).toBeGreaterThan(1);
+      expect(page).toBeLessThan(20);
+      expect(displayedRows).toHaveLength(entries.length);
+      entries.forEach((item, index) => {
+        expect(displayedRows[index]).toContain(
+          `**${index < 130 ? 1 : 131}位**｜<@${item.userId}>`
+        );
+      });
+    }
+  );
+
+  it("clamps a stale page after the dead ranking shrinks", () => {
+    const panel = deadRankingPanel([deadEntry("2001", 1, 10)], new Date(), 50);
+    expect(panel.embeds[0]?.data.description).toContain("**1位**｜<@2001>");
+    expect(panel.components).toEqual([]);
+    expect(
+      deadRankingPanel([], new Date(), 50).embeds[0]?.data.description
+    ).toContain("まだ枯れたまりもはいません。");
+  });
+
+  it("accepts only valid ranking page targets", () => {
+    expect(rankingPageTarget("marimo:ranking:dead:2")).toEqual({
+      kind: "dead",
+      page: 2
+    });
+    expect(rankingPageTarget("marimo:ranking:size:0")).toEqual({
+      kind: "size",
+      page: 0
+    });
+    for (const id of [
+      "marimo:water",
+      "marimo:ranking:dead:-1",
+      "marimo:ranking:dead:1.5",
+      "marimo:ranking:water:1",
+      "marimo:ranking:dead:9007199254740992"
+    ]) {
+      expect(rankingPageTarget(id)).toBeNull();
+    }
   });
 
   it("announces a first interaction as a birth, not a water change", () => {

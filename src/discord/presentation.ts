@@ -190,10 +190,93 @@ function leaderboardLine(entry: RankingEntry, rank: number): string {
   return `**${rank}位**｜${ownerMention(entry.userId)}｜**${entry.sizeMm.toFixed(2)} mm**｜${displayMarimoName(entry.name)}`;
 }
 
+export type RankingPageTarget = { kind: "size" | "dead"; page: number };
+
+export function rankingPageTarget(customId: string): RankingPageTarget | null {
+  const match = /^marimo:ranking:(size|dead):(\d+)$/.exec(customId);
+  if (match === null) return null;
+  const page = Number(match[2]);
+  if (!Number.isSafeInteger(page)) return null;
+  return { kind: match[1] as RankingPageTarget["kind"], page };
+}
+
+type RankingPanelPayload = {
+  content: string;
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+  flags: [];
+};
+
+function paginatedRankingPanel(input: {
+  lines: string[];
+  emptyText: string;
+  title: string;
+  color: number;
+  kind: RankingPageTarget["kind"];
+  updatedAt: Date;
+  page: number;
+}): RankingPanelPayload {
+  // Leave room for the page count and timestamp inside Discord's 4,096 limit.
+  let currentPage: string[] = [];
+  const pages: string[][] = [currentPage];
+  let length = 0;
+  for (const line of input.lines) {
+    if (currentPage.length > 0 && length + 1 + line.length > 3800) {
+      currentPage = [];
+      pages.push(currentPage);
+      length = 0;
+    }
+    length += (currentPage.length > 0 ? 1 : 0) + line.length;
+    currentPage.push(line);
+  }
+  const requestedPage = Number.isSafeInteger(input.page) ? input.page : 0;
+  const page = Math.max(0, Math.min(requestedPage, pages.length - 1));
+  const pageLines = pages[page] ?? [];
+  const description = [
+    pageLines.length === 0 ? input.emptyText : pageLines.join("\n"),
+    "",
+    ...(pages.length > 1
+      ? [`-# ${page + 1} / ${pages.length}ページ・全${input.lines.length}件`]
+      : []),
+    `-# 最終更新 <t:${Math.floor(input.updatedAt.getTime() / 1000)}:R>`
+  ].join("\n");
+  const components: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (pages.length > 1) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`marimo:ranking:${input.kind}:${Math.max(0, page - 1)}`)
+          .setLabel("前のページ")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page === 0),
+        new ButtonBuilder()
+          .setCustomId(
+            `marimo:ranking:${input.kind}:${Math.min(pages.length - 1, page + 1)}`
+          )
+          .setLabel("次のページ")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page === pages.length - 1)
+      )
+    );
+  }
+  return {
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setColor(input.color)
+        .setTitle(input.title)
+        .setDescription(description)
+    ],
+    components,
+    flags: []
+  };
+}
+
 export function rankingPanel(
   entries: RankingEntry[],
-  updatedAt: Date
-): { content: string; embeds: EmbedBuilder[]; components: []; flags: [] } {
+  updatedAt: Date,
+  page = 0
+): RankingPanelPayload {
   const sorted = [...entries].sort((left, right) => right.sizeMm - left.sizeMm);
   let rank = 0;
   let previousSize: string | undefined;
@@ -203,22 +286,15 @@ export function rankingPanel(
     previousSize = displayedSize;
     return leaderboardLine(entry, rank);
   });
-  const description = [
-    lines.length === 0 ? "まだ生きているまりもはいません。" : lines.join("\n"),
-    "",
-    `-# 最終更新 <t:${Math.floor(updatedAt.getTime() / 1000)}:R>`
-  ].join("\n");
-  return {
-    content: "",
-    embeds: [
-      new EmbedBuilder()
-        .setColor(MARIMO_GREEN)
-        .setTitle("📏 巨大まりもランキング")
-        .setDescription(description)
-    ],
-    components: [],
-    flags: []
-  };
+  return paginatedRankingPanel({
+    lines,
+    emptyText: "まだ生きているまりもはいません。",
+    title: "📏 巨大まりもランキング",
+    color: MARIMO_GREEN,
+    kind: "size",
+    updatedAt,
+    page
+  });
 }
 
 function deadLeaderboardLine(entry: DeadMarimo, rank: number): string {
@@ -227,8 +303,9 @@ function deadLeaderboardLine(entry: DeadMarimo, rank: number): string {
 
 export function deadRankingPanel(
   entries: DeadMarimo[],
-  updatedAt: Date
-): { content: string; embeds: EmbedBuilder[]; components: []; flags: [] } {
+  updatedAt: Date,
+  page = 0
+): RankingPanelPayload {
   const sorted = [...entries].sort(
     (left, right) => right.finalSizeMm - left.finalSizeMm
   );
@@ -240,22 +317,15 @@ export function deadRankingPanel(
     previousSize = displayedSize;
     return deadLeaderboardLine(entry, rank);
   });
-  const description = [
-    lines.length === 0 ? "まだ枯れたまりもはいません。" : lines.join("\n"),
-    "",
-    `-# 最終更新 <t:${Math.floor(updatedAt.getTime() / 1000)}:R>`
-  ].join("\n");
-  return {
-    content: "",
-    embeds: [
-      new EmbedBuilder()
-        .setColor(0x766b5e)
-        .setTitle("🥀 枯れたまりも大きさランキング")
-        .setDescription(description)
-    ],
-    components: [],
-    flags: []
-  };
+  return paginatedRankingPanel({
+    lines,
+    emptyText: "まだ枯れたまりもはいません。",
+    title: "🥀 枯れたまりも大きさランキング",
+    color: 0x766b5e,
+    kind: "dead",
+    updatedAt,
+    page
+  });
 }
 
 export function statusContent(

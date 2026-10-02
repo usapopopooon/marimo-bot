@@ -2,6 +2,7 @@ import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import {
   GatewayIntentBits,
+  MessageFlags,
   PermissionFlagsBits,
   PermissionsBitField,
   TextChannel,
@@ -1804,6 +1805,145 @@ describe("panel interaction wiring", () => {
     expect(updateRankings.mock.calls[0]?.[1]).toEqual(
       updateRankings.mock.calls[1]?.[1]
     );
+  });
+
+  it.each(["size", "dead"] as const)(
+    "opens a private %s ranking page with the correct records and exclusions",
+    async (kind) => {
+      const entries = Array.from({ length: 80 }, (_, index) => ({
+        ...living,
+        ...death,
+        id: String(index),
+        userId: String(100000000000000000n + BigInt(index)),
+        sizeMm: 200 - index,
+        finalSizeMm: 300 - index,
+        name: `ページ確認用のまりも${index}`
+      }));
+      const excluded = entries.at(-1);
+      if (excluded === undefined) throw new Error("Expected ranking fixtures");
+      const rankings = vi.fn().mockResolvedValue(entries);
+      const deadRankings = vi.fn().mockResolvedValue(entries);
+      const bot = botWith(
+        { rankings, deadRankings },
+        {
+          rankingBlockedUserIds: vi
+            .fn()
+            .mockResolvedValue(new Set([excluded.userId]))
+        }
+      );
+      const deferReply = vi.fn().mockResolvedValue(undefined);
+      const deferUpdate = vi.fn();
+      const editReply = vi.fn().mockResolvedValue(undefined);
+      const editPublicMessage = vi.fn();
+      await dispatch(bot, {
+        isButton: () => true,
+        customId: `marimo:ranking:${kind}:1`,
+        guildId: "1001",
+        message: { flags: { has: () => false }, edit: editPublicMessage },
+        deferReply,
+        deferUpdate,
+        editReply
+      });
+      expect(deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral
+      });
+      expect(deferUpdate).not.toHaveBeenCalled();
+      expect(editPublicMessage).not.toHaveBeenCalled();
+      expect(kind === "dead" ? rankings : deadRankings).not.toHaveBeenCalled();
+      if (kind === "dead") expect(deadRankings).toHaveBeenCalledWith("1001");
+      else expect(rankings).toHaveBeenCalledWith("1001", expect.any(Date));
+      expect(editReply).toHaveBeenCalledOnce();
+      const payload = editReply.mock.calls[0]?.[0] as
+        | {
+            embeds: { data: { title?: string; description?: string } }[];
+            allowedMentions: { parse: string[] };
+          }
+        | undefined;
+      expect(payload?.allowedMentions).toEqual({ parse: [] });
+      expect(payload).not.toHaveProperty("flags");
+      expect(payload?.embeds[0]?.data.title).toContain(
+        kind === "dead" ? "枯れたまりも" : "巨大まりも"
+      );
+      expect(payload?.embeds[0]?.data.description).toContain(
+        `<@${entries[78]?.userId}>`
+      );
+      expect(payload?.embeds[0]?.data.description).toContain(
+        kind === "dead" ? "222.00 mm" : "122.00 mm"
+      );
+      expect(payload?.embeds[0]?.data.description).not.toContain(
+        `<@${excluded.userId}>`
+      );
+    }
+  );
+
+  it("updates only the existing private ranking view on subsequent page clicks", async () => {
+    const bot = botWith({ deadRankings: vi.fn().mockResolvedValue([death]) });
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const deferReply = vi.fn();
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: "marimo:ranking:dead:0",
+      guildId: "1001",
+      message: {
+        flags: { has: (flag: MessageFlags) => flag === MessageFlags.Ephemeral }
+      },
+      deferUpdate,
+      deferReply,
+      editReply
+    });
+    expect(deferUpdate).toHaveBeenCalledOnce();
+    expect(deferReply).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledOnce();
+    const payload = editReply.mock.calls[0]?.[0] as
+      { embeds: { data: { description?: string } }[] } | undefined;
+    expect(payload?.embeds[0]?.data.description).toContain("<@2001>");
+  });
+
+  it.each(["size", "dead"] as const)(
+    "requires an allowed role before reading a %s ranking page",
+    async (kind) => {
+      const rankings = vi.fn();
+      const deadRankings = vi.fn();
+      const allowedRoleIds = vi.fn().mockResolvedValue(["5001"]);
+      const reply = vi.fn().mockResolvedValue(undefined);
+      const deferReply = vi.fn();
+      await dispatch(botWith({ rankings, deadRankings, allowedRoleIds }), {
+        isButton: () => true,
+        customId: `marimo:ranking:${kind}:1`,
+        guildId: "1001",
+        member: { roles: [] },
+        reply,
+        deferReply
+      });
+      expect(allowedRoleIds).toHaveBeenCalledWith("1001");
+      expect(reply).toHaveBeenCalledWith({
+        content:
+          "まりもBotを利用するには、次のロールのいずれかが必要です。\n<@&5001>",
+        ephemeral: true,
+        allowedMentions: { parse: [] }
+      });
+      expect(rankings).not.toHaveBeenCalled();
+      expect(deadRankings).not.toHaveBeenCalled();
+      expect(deferReply).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects ranking navigation outside a guild without querying records", async () => {
+    const deadRankings = vi.fn();
+    const bot = botWith({ deadRankings });
+    const reply = vi.fn().mockResolvedValue(undefined);
+    await dispatch(bot, {
+      isButton: () => true,
+      customId: "marimo:ranking:dead:1",
+      guildId: null,
+      reply
+    });
+    expect(reply).toHaveBeenCalledWith({
+      content: "サーバー内のランキングから操作してください。",
+      ephemeral: true
+    });
+    expect(deadRankings).not.toHaveBeenCalled();
   });
 
   it("uses the command channel for marimo logs and reminders", async () => {

@@ -6,6 +6,7 @@ import {
   GatewayIntentBits,
   type GuildBan,
   GuildMember,
+  MessageFlags,
   PermissionFlagsBits,
   REST,
   Routes,
@@ -56,6 +57,8 @@ import {
   mossColaRevivalConfirmation,
   removeDeathLogRescueHelp,
   rankingPanel,
+  rankingPageTarget,
+  type RankingPageTarget,
   REMINDER_BUTTON_ID,
   REMINDER_HOUR_BUTTON_PREFIX,
   REMINDER_OFF_BUTTON_ID,
@@ -327,6 +330,13 @@ export class MarimoBot {
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
       if (interaction.isButton()) {
+        const rankingPage = rankingPageTarget(interaction.customId);
+        if (rankingPage !== null) {
+          if (await this.ensureMarimoAccess(interaction)) {
+            await this.handleRankingPage(interaction, rankingPage);
+          }
+          return;
+        }
         if (interaction.customId === MOSS_COLA_REVIVE_CANCEL_BUTTON_ID) {
           await interaction.update({
             content: "復活をやめました。苔コーラは消費していません。",
@@ -458,6 +468,48 @@ export class MarimoBot {
       });
     }
     return isCurrent;
+  }
+
+  private async handleRankingPage(
+    interaction: ButtonInteraction,
+    target: RankingPageTarget
+  ): Promise<void> {
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "サーバー内のランキングから操作してください。",
+        ephemeral: true
+      });
+      return;
+    }
+    if (interaction.message.flags.has(MessageFlags.Ephemeral)) {
+      await interaction.deferUpdate();
+    } else {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
+    const now = new Date();
+    const blocked = await this.rankingBlockedUserIds(interaction.guildId);
+    const payload =
+      target.kind === "dead"
+        ? deadRankingPanel(
+            (await this.repository.deadRankings(interaction.guildId)).filter(
+              (entry) => !blocked.has(entry.userId)
+            ),
+            now,
+            target.page
+          )
+        : rankingPanel(
+            (await this.repository.rankings(interaction.guildId, now)).filter(
+              (entry) => !blocked.has(entry.userId)
+            ),
+            now,
+            target.page
+          );
+    await interaction.editReply({
+      content: payload.content,
+      embeds: payload.embeds,
+      components: payload.components,
+      allowedMentions: { parse: [] }
+    });
   }
 
   private async ensureMarimoAccess(
